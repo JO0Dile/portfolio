@@ -3,7 +3,7 @@
 Personal portfolio for **Hammam "Dile" Al Natsha** — AI & Robotics Engineering student at the Arab American University of Palestine.
 
 ## Live
-[YOUR-USERNAME.github.io/portfolio](https://JO0Dile.github.io/portfolio)
+[JO0Dile.github.io/portfolio](https://JO0Dile.github.io/portfolio)
 
 ## Features
 
