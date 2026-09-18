@@ -5,8 +5,6 @@ Personal portfolio for **Hammam "Dile" Al Natsha** — AI & Robotics Engineering
 ## Live
 [YOUR-USERNAME.github.io/portfolio](https://JO0Dile.github.io/portfolio)
 
-> Replace `YOUR-USERNAME` with your actual GitHub username after the first deploy.
-
 ## Features
 
 - 🎨 Pastel cool-cute aesthetic with a dynamic 3D scene (Three.js)
