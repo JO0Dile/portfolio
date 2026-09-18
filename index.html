@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DILE ✦ AI & Robotics — Hammam Al Natsha</title>
+    <meta name="description" content="Hammam 'Dile' Al Natsha — AI & Robotics Engineering student.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='55' r='38' fill='white' stroke='%23223b4a' stroke-width='4'/><circle cx='38' cy='52' r='5' fill='%23223b4a'/><circle cx='62' cy='52' r='5' fill='%23223b4a'/><circle cx='39' cy='50' r='1.5' fill='white'/><circle cx='63' cy='50' r='1.5' fill='white'/><ellipse cx='30' cy='64' rx='6' ry='4' fill='%23ffb3ce' opacity='0.6'/><ellipse cx='70' cy='64' rx='6' ry='4' fill='%23ffb3ce' opacity='0.6'/><path d='M46 66 Q50 70 54 66' stroke='%23223b4a' stroke-width='2.5' fill='none' stroke-linecap='round'/></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=10">
+    <link rel="stylesheet" href="fx.css?v=10">
+    <link rel="stylesheet" href="mockups.css?v=10">
+    <link rel="stylesheet" href="lab-modal.css?v=10">
+    <link rel="stylesheet" href="anims.css?v=10">
+</head>
+<body>
+
+    <!-- 3D world -->
+    <div id="webgl-container"></div>
+
+    <!-- Petal overlay -->
+    <div id="petal-overlay"></div>
+
+    <!-- Photo mode frame -->
+    <div class="photo-frame" aria-hidden="true"></div>
+
+    <!-- Loader -->
+    <div id="loader">
+        <div class="loader-mascot">
+            <div class="loader-ear left"></div>
+            <div class="loader-ear right"></div>
+            <div class="loader-head">
+                <div class="loader-eye left"><span></span></div>
+                <div class="loader-eye right"><span></span></div>
+                <div class="loader-blush left"></div>
+                <div class="loader-blush right"></div>
+                <div class="loader-mouth"></div>
+            </div>
+        </div>
+        <div class="loader-text" id="loader-text">waking up...</div>
+        <div class="loader-dots"><span></span><span></span><span></span></div>
+    </div>
+
+    <!-- Cursor -->
+    <div class="cursor-dot"></div>
+    <div class="cursor-outline"></div>
+
+    <!-- Companion pet -->
+    <div class="companion" id="companion" aria-hidden="true">
+        <div class="companion-ear left"></div>
+        <div class="companion-ear right"></div>
+        <div class="companion-head">
+            <div class="companion-eye left"><span></span></div>
+            <div class="companion-eye right"><span></span></div>
+            <div class="companion-blush left"></div>
+            <div class="companion-blush right"></div>
+            <div class="companion-mouth"></div>
+        </div>
+        <div class="companion-body"><div class="companion-heart">♥</div></div>
+        <div class="companion-speech" id="companion-speech"></div>
+        <div class="companion-zzz" id="companion-zzz">z</div>
+    </div>
+
+    <!-- Side floating badges -->
+    <div class="side-badge side-badge-left" aria-hidden="true">✦ online</div>
+    <div class="side-badge side-badge-right" aria-hidden="true">building ◕‿◕</div>
+
+    <!-- NAV -->
+    <nav class="nav">
+        <div class="nav-logo">DILE <span class="nav-heart">♥</span></div>
+        <div class="nav-links">
+            <a href="#about" class="nav-link">about</a>
+            <a href="#work" class="nav-link">work</a>
+            <a href="#lab" class="nav-link">lab</a>
+            <a href="#contact" class="nav-link">say hi</a>
+        </div>
+        <div class="nav-progress"><div class="nav-progress-fill"></div></div>
+    </nav>
+
+    <!-- Marquee #1 -->
+    <div class="marquee-strip">
+        <div class="marquee-track">✦ AI ENGINEERING ✦ ROBOTICS ✦ REINFORCEMENT LEARNING ✦ LOCAL LLMs ✦ UNITY ✦ PYTHON ✦ CREATIVE DEV ✦ HAMMAM AL NATSHA ✦ DILE ✦ AI ENGINEERING ✦ ROBOTICS ✦ RL ✦ LOCAL LLMs ✦ UNITY ✦ PYTHON ✦</div>
+    </div>
+
+    <!-- HERO -->
+    <section id="hero" class="section">
+        <div class="panel hero-panel" data-panel>
+            <div class="panel-tape"></div>
+            <div class="hero-badge">✦ ai ✦ robotics ✦ curious</div>
+            <h1 class="hero-title">
+                <span class="hero-hi">hi, i'm</span>
+                <span class="hero-name">DILE</span>
+            </h1>
+            <p class="hero-tag">curious enough to ask.<br>stubborn enough to build. <span class="hero-pinky">◕‿◕</span></p>
+            <div class="hero-hint">
+                <span class="hero-hint-arrow">↓</span>
+                scroll to explore my little world
+            </div>
+            <div class="hero-orbit" aria-hidden="true">
+                <span class="orbit-dot"></span>
+                <span class="orbit-dot"></span>
+                <span class="orbit-dot"></span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ABOUT -->
+    <section id="about" class="section">
+        <div class="panel about-panel" data-panel>
+            <div class="panel-tape left"></div>
+            <div class="panel-tape right"></div>
+            <div class="panel-badge">01 — about me</div>
+            <h2 class="panel-title">
+                <span class="word">little</span> <span class="word">human,</span><br>
+                <span class="word">big</span> <span class="word">curiosity.</span>
+            </h2>
+            <p class="panel-desc">I'm <strong>Hammam "Dile" Al Natsha</strong>, an AI &amp; Robotics Engineering student at the Arab American University of Palestine. I spend my time making tiny robots, training little AI brains, and trying to make software that feels alive.</p>
+            <div class="chip-list">
+                <span class="chip chip-pink">artificial intelligence</span>
+                <span class="chip chip-lav">robotics</span>
+                <span class="chip chip-mint">software engineering</span>
+                <span class="chip chip-peach">experimental tech</span>
+                <span class="chip chip-pink">creative dev</span>
+            </div>
+            <div class="status-pill">
+                <span class="status-dot"></span>
+                <span>● currently: training tiny AI brains</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Marquee #2 -->
+    <div class="marquee-strip marquee-strip-rev">
+        <div class="marquee-track">◕‿◕ HELLO WORLD ◕‿◕ TINY ROBOTS ◕‿◕ TRAINING BRAINS ◕‿◕ BUILDING WORLDS ◕‿◕ CUTE CODE ◕‿◕ HELLO WORLD ◕‿◕ TINY ROBOTS ◕‿◕ TRAINING BRAINS ◕‿◕</div>
+    </div>
+
+    <!-- WORK -->
+    <section id="work" class="section">
+        <div class="panel work-panel" data-panel>
+            <div class="panel-tape"></div>
+            <div class="panel-badge">02 — my projects</div>
+            <h2 class="panel-title">
+                <span class="word">little</span> <span class="word">things</span> <span class="word">i</span> <span class="word">built</span> <span class="word">✦</span>
+            </h2>
+            <div class="projects-grid">
+                <div class="project-card" data-project="01">
+                    <div class="project-icon icon-01">📚</div>
+                    <div class="project-meta">
+                        <span class="project-num">01</span>
+                        <h3 class="project-name">AAUP Academic Planner</h3>
+                        <p class="project-blurb">academic planning with prereqs, progress &amp; RTL</p>
+                        <div class="project-chips"><span>JavaScript</span><span>PostgreSQL</span><span>RTL</span></div>
+                    </div>
+                    <div class="project-arrow">→</div>
+                </div>
+                <div class="project-card" data-project="02">
+                    <div class="project-icon icon-02">🛠️</div>
+                    <div class="project-meta">
+                        <span class="project-num">02</span>
+                        <h3 class="project-name">Construction &amp; Trades</h3>
+                        <p class="project-blurb">offline-first work app for real-world crews</p>
+                        <div class="project-chips"><span>Android</span><span>Offline</span><span>Multi-lang</span></div>
+                    </div>
+                    <div class="project-arrow">→</div>
+                </div>
+                <div class="project-card" data-project="03">
+                    <div class="project-icon icon-03">🔬</div>
+                    <div class="project-meta">
+                        <span class="project-num">03</span>
+                        <h3 class="project-name">RL-Scientist</h3>
+                        <p class="project-blurb">a local LLM that proposes its own RL experiments</p>
+                        <div class="project-chips"><span>Python</span><span>Ollama</span><span>RL</span></div>
+                    </div>
+                    <div class="project-arrow">→</div>
+                </div>
+                <div class="project-card" data-project="04">
+                    <div class="project-icon icon-04">🛍️</div>
+                    <div class="project-meta">
+                        <span class="project-num">04</span>
+                        <h3 class="project-name">Listing Lab</h3>
+                        <p class="project-blurb">local-first AI that writes your listings for you</p>
+                        <div class="project-chips"><span>Ollama</span><span>LM Studio</span><span>Local AI</span></div>
+                    </div>
+                    <div class="project-arrow">→</div>
+                </div>
+                <div class="project-card" data-project="05">
+                    <div class="project-icon icon-05">🧩</div>
+                    <div class="project-meta">
+                        <span class="project-num">05</span>
+                        <h3 class="project-name">AIMaze</h3>
+                        <p class="project-blurb">a Unity agent learning mazes, traps &amp; buttons</p>
+                        <div class="project-chips"><span>Unity</span><span>RL</span><span>Simulation</span></div>
+                    </div>
+                    <div class="project-arrow">→</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Marquee #3 -->
+    <div class="marquee-strip">
+        <div class="marquee-track">✦ SCROLL ✦ DISCOVER ✦ BUILD ✦ LEARN ✦ ITERATE ✦ SHIP ✦ REPEAT ✦ SCROLL ✦ DISCOVER ✦ BUILD ✦ LEARN ✦ ITERATE ✦ SHIP ✦</div>
+    </div>
+
+    <!-- LAB -->
+    <section id="lab" class="section">
+        <div class="panel lab-panel" data-panel>
+            <div class="panel-tape left"></div>
+            <div class="panel-tape right"></div>
+            <div class="panel-badge">03 — my toolbox</div>
+            <h2 class="panel-title">
+                <span class="word">things</span> <span class="word">in</span> <span class="word">my</span> <span class="word">lab</span> <span class="word">✦</span>
+            </h2>
+            <div class="lab-grid">
+                <div class="lab-box lab-pink">
+                    <div class="lab-icon">✦</div>
+                    <h3>languages</h3>
+                    <ul><li>Python</li><li>C++</li><li>JavaScript</li></ul>
+                </div>
+                <div class="lab-box lab-lav">
+                    <div class="lab-icon">✦</div>
+                    <h3>development</h3>
+                    <ul><li>HTML &amp; CSS</li><li>FastAPI</li><li>Android</li></ul>
+                </div>
+                <div class="lab-box lab-mint">
+                    <div class="lab-icon">✦</div>
+                    <h3>ai / data</h3>
+                    <ul><li>Machine Learning</li><li>Reinforcement Learning</li><li>Local LLMs</li><li>PostgreSQL</li></ul>
+                </div>
+                <div class="lab-box lab-peach">
+                    <div class="lab-icon">✦</div>
+                    <h3>other</h3>
+                    <ul><li>Unity</li><li>REST APIs</li><li>Responsive Web</li></ul>
+                </div>
+            </div>
+            <div class="building-box">
+                <div class="building-title">✦ currently building</div>
+                <div class="building-rows">
+                    <div class="building-row"><span>RL-Scientist</span><span class="building-status">iterating</span></div>
+                    <div class="building-row"><span>AIMaze</span><span class="building-status">training</span></div>
+                    <div class="building-row"><span>AAUP Academic Planner</span><span class="building-status">building</span></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CONTACT -->
+    <section id="contact" class="section">
+        <div class="panel contact-panel" data-panel>
+            <div class="panel-tape"></div>
+            <div class="panel-badge">04 — say hi ✦</div>
+            <h2 class="panel-title">
+                <span class="word">wanna</span> <span class="word">make</span> <span class="word">something</span> <span class="word">cute?</span>
+            </h2>
+            <p class="panel-desc">If you have an idea — a tiny robot, a strange experiment, a beautiful little product — I'd love to hear about it.</p>
+            <button class="email-btn" id="email-btn" data-email="a.natsha1@student.aaup.edu">
+                <span class="email-text">a.natsha1@student.aaup.edu</span>
+                <span class="email-heart">✦</span>
+            </button>
+            <p class="email-hint" id="email-hint">click to copy ✦</p>
+        </div>
+        <div class="back-top" id="back-top">↑ back to the top</div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+        <div class="footer-inner">
+            <div class="footer-line-top">✦</div>
+            <div class="footer-name">HAMMAM AL NATSHA</div>
+            <div class="footer-role">AI &amp; Robotics Engineering</div>
+
+            <p class="footer-about">
+                an AI student who stays up way too late teaching tiny robots
+                how to solve mazes.<br>
+                <span class="footer-about-accent">they're getting smarter. i'm getting sleepier.</span>
+            </p>
+
+            <div class="footer-divider">· · ·</div>
+
+            <div class="footer-tagline">curiosity → creation → reality</div>
+            <div class="footer-copy">
+                made with <span class="footer-heart">♥</span>, <span class="footer-coffee">☕</span>, and one very sleepy robot
+            </div>
+            <div class="footer-robot-note">
+                (the robot has feelings. it told me.)
+            </div>
+        </div>
+    </footer>
+
+    <!-- MODAL (with mockup visual container) -->
+    <div id="project-modal" class="modal">
+        <div class="modal-inner">
+            <button class="modal-close" aria-label="close">✕</button>
+            <div class="modal-tape"></div>
+            <div class="modal-header">
+                <span class="modal-num" id="modal-num">01</span>
+                <h2 class="modal-title" id="modal-title">title</h2>
+                <span class="modal-status" id="modal-status">status</span>
+            </div>
+            <div class="modal-visual" id="modal-visual"></div>
+            <p class="modal-desc" id="modal-desc"></p>
+            <div class="modal-section">
+                <h4>✦ key features</h4>
+                <ul id="modal-features"></ul>
+            </div>
+            <div class="modal-section">
+                <h4>✦ technologies</h4>
+                <div class="modal-chips" id="modal-chips"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+    <script src="script.js?v=10"></script>
+    <script src="mockup-patch.js?v=10"></script>
+    <script src="extras.js?v=10"></script>
+    <script src="robot.js?v=10"></script>
+    <script src="anims.js?v=10"></script>
+    <script src="fix-titles.js?v=10"></script>
+    <script src="lab-modal.js?v=10"></script>
+    <script src="building-rows.js?v=10"></script>
+</body>
+</html>
