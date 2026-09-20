@@ -1,0 +1,120 @@
+/* ============================================================
+   stage.css — scroll stages for scene-rendered sections
+   Work / Lab / About have no HTML boxes any more. Each one is
+   a tall scroll track made of N full-viewport "slots"; the 3D
+   scene paints the content for the slot you are parked on.
+   ============================================================ */
+
+/* ── Section shell ─────────────────────────────────────────── */
+.section-stage {
+    padding: 0;
+    border-top: 1px solid var(--line);
+}
+
+.stage {
+    position: relative;
+    padding-top: 120px;
+    padding-bottom: 0;
+}
+
+/* The heading pins while its slots scroll past underneath, so you
+   always know which section you are in. */
+.section-head.is-sticky {
+    position: sticky;
+    top: calc(var(--nav-h) + 32px);
+    z-index: 4;
+    margin-bottom: 0;
+    pointer-events: none;
+}
+
+/* ── Slots ─────────────────────────────────────────────────── */
+.stage-slots {
+    margin-top: 40px;
+}
+
+.stage-slot {
+    height: 100vh;
+    position: relative;
+}
+
+/* Last slot needs trailing room so the final formation can settle
+   before the next section's border arrives. */
+.section-stage .stage-slots .stage-slot:last-child {
+    height: 120vh;
+}
+
+/* ── Screen-reader only ────────────────────────────────────────
+   The project and skill copy still lives in the DOM for crawlers
+   and assistive tech — it is just not painted as a visible box. */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* ── Scene breathing room ──────────────────────────────────────
+   Nothing in a stage section should be clickable or catch the
+   pointer — the canvas behind it owns that area. */
+.section-stage .container {
+    pointer-events: none;
+}
+
+/* ── Contact stays interactive ─────────────────────────────── */
+.section-contact .container {
+    pointer-events: auto;
+}
+
+/* ── Progress rail ─────────────────────────────────────────────
+   A thin fixed rail on the right marking which slot you are on.
+   Populated by script.js. */
+.stage-rail {
+    position: fixed;
+    right: 26px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.5s var(--ease-out);
+}
+.stage-rail.is-visible { opacity: 1; }
+
+.stage-rail-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--line-hi);
+    transition:
+        background 0.35s var(--ease-out),
+        height 0.35s var(--ease-out),
+        border-radius 0.35s var(--ease-out);
+}
+.stage-rail-dot.is-active {
+    background: var(--accent);
+    height: 18px;
+    border-radius: 3px;
+}
+
+/* ── Mobile ────────────────────────────────────────────────────
+   Shorter slots so the page is not an endless scroll on a phone,
+   and the sticky head sits tighter to the nav. */
+@media (max-width: 860px) {
+    .stage { padding-top: 88px; }
+    .section-head.is-sticky { top: calc(var(--nav-h) + 16px); }
+    .stage-slot { height: 78vh; }
+    .section-stage .stage-slots .stage-slot:last-child { height: 92vh; }
+    .stage-rail { right: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .stage-rail-dot { transition: none; }
+}

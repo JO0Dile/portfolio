@@ -15,9 +15,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=8">
-    <link rel="stylesheet" href="polish.css?v=8">
-    <link rel="stylesheet" href="stage.css?v=8">
+    <link rel="stylesheet" href="style.css?v=6">
+    <link rel="stylesheet" href="polish.css?v=7">
     <script type="importmap">
     {
         "imports": {
@@ -119,63 +118,101 @@
             </div>
         </section>
 
-        <!-- ABOUT — 1 stage slot, rendered by the scene -->
-        <section class="section section-stage" id="about" data-section="about" data-slots="1">
-            <div class="container stage">
-                <div class="section-head is-sticky">
+        <!-- ABOUT -->
+        <section class="section" id="about" data-section="about">
+            <div class="container">
+                <div class="section-head">
                     <span class="section-num">01</span>
                     <h2 class="section-title">About</h2>
                     <span class="section-tag">Bio</span>
                 </div>
-                <div class="stage-slots">
-                    <div class="stage-slot">
-                        <p class="sr-only">
-                            AI and Robotics Engineering student at the Arab American
-                            University of Palestine, working in the middle ground between
-                            research and software engineering. Focus: Reinforcement Learning
-                            and local LLMs.
+
+                <div class="about-grid">
+                    <div class="about-body">
+                        <p class="about-lead">
+                            I'm an AI &amp; Robotics Engineering student who enjoys the
+                            uncomfortable middle ground between research and software
+                            engineering.
                         </p>
+                        <p>
+                            My work usually starts with a question — can a model learn
+                            this faster? Can this workflow be made offline-first? Can
+                            a small local LLM replace a cloud call? — and ends as a
+                            shipped tool that someone actually uses.
+                        </p>
+                        <p>
+                            I care about clean systems, honest interfaces, and code
+                            that survives being read by the next person. When I'm not
+                            building, I'm reading papers, breaking my own training
+                            runs, or refactoring something that was already working.
+                        </p>
+
+                        <div class="about-facts">
+                            <div class="fact">
+                                <span class="fact-key">University</span>
+                                <span class="fact-val">Arab American University of Palestine</span>
+                            </div>
+                            <div class="fact">
+                                <span class="fact-key">Field</span>
+                                <span class="fact-val">AI &amp; Robotics Engineering</span>
+                            </div>
+                            <div class="fact">
+                                <span class="fact-key">Focus</span>
+                                <span class="fact-val">Reinforcement Learning · Local LLMs</span>
+                            </div>
+                        </div>
                     </div>
+
+                    <aside class="about-side">
+                        <div class="side-block">
+                            <div class="side-block-label">Currently</div>
+                            <ul class="side-list">
+                                <li><span class="side-dot"></span>RL-Scientist — iteration loop</li>
+                                <li><span class="side-dot"></span>AIMaze — training agents</li>
+                                <li><span class="side-dot"></span>AAUP Planner — v2 build</li>
+                            </ul>
+                        </div>
+                        <div class="side-block">
+                            <div class="side-block-label">Interests</div>
+                            <ul class="side-list side-list-plain">
+                                <li>Reinforcement Learning</li>
+                                <li>Local inference</li>
+                                <li>Systems design</li>
+                                <li>Developer tooling</li>
+                            </ul>
+                        </div>
+                    </aside>
                 </div>
             </div>
         </section>
 
-        <!-- WORK — 5 stage slots, rendered by the scene -->
-        <section class="section section-stage" id="work" data-section="work" data-slots="5">
-            <div class="container stage">
-                <div class="section-head is-sticky">
+        <!-- WORK -->
+        <section class="section" id="work" data-section="work">
+            <div class="container">
+                <div class="section-head">
                     <span class="section-num">02</span>
                     <h2 class="section-title">Work</h2>
-                    <span class="section-tag">Selected projects</span>
+                    <span class="section-tag">Selected projects — click to open</span>
                 </div>
-                <div class="stage-slots">
-                    <div class="stage-slot"><p class="sr-only"><strong>AAUP Academic Planner</strong> — academic planning platform with prerequisites, progress tracking and RTL support.</p></div>
-                    <div class="stage-slot"><p class="sr-only"><strong>Construction &amp; Trades</strong> — offline-first work management for real-world crews.</p></div>
-                    <div class="stage-slot"><p class="sr-only"><strong>RL-Scientist</strong> — a local LLM that proposes and evaluates its own reinforcement learning experiments.</p></div>
-                    <div class="stage-slot"><p class="sr-only"><strong>Listing Lab</strong> — local-first AI for generating marketplace product listings.</p></div>
-                    <div class="stage-slot"><p class="sr-only"><strong>AIMaze</strong> — Unity ML-Agents environment where a PPO agent learns to solve mazes.</p></div>
-                </div>
+
+                <div class="work-list" id="work-list"></div>
             </div>
         </section>
 
-        <!-- LAB — 4 stage slots, rendered by the scene -->
-        <section class="section section-stage" id="lab" data-section="lab" data-slots="4">
-            <div class="container stage">
-                <div class="section-head is-sticky">
+        <!-- LAB -->
+        <section class="section" id="lab" data-section="lab">
+            <div class="container">
+                <div class="section-head">
                     <span class="section-num">03</span>
                     <h2 class="section-title">Lab</h2>
-                    <span class="section-tag">Skills</span>
+                    <span class="section-tag">Skills — click to open</span>
                 </div>
-                <div class="stage-slots">
-                    <div class="stage-slot"><p class="sr-only"><strong>Languages</strong> — Python (primary), C++ (systems), JavaScript (web), SQL (data).</p></div>
-                    <div class="stage-slot"><p class="sr-only"><strong>Frameworks</strong> — FastAPI (backend), Android (mobile), PostgreSQL (database), Unity (simulation).</p></div>
-                    <div class="stage-slot"><p class="sr-only"><strong>AI / Data</strong> — Reinforcement Learning, Machine Learning, local LLMs via Ollama, data pipelines.</p></div>
-                    <div class="stage-slot"><p class="sr-only"><strong>Other</strong> — REST API design, responsive web, Git workflow, Linux.</p></div>
-                </div>
+
+                <div class="lab-grid" id="lab-grid"></div>
             </div>
         </section>
 
-        <!-- CONTACT — the only interactive block on the page -->
+        <!-- CONTACT -->
         <section class="section section-contact" id="contact" data-section="contact">
             <div class="container">
                 <div class="section-head">
@@ -191,8 +228,8 @@
                             worth building?
                         </h3>
                         <p class="contact-desc">
-                            Whether it is a small experiment, a research idea,
-                            or a full product — I would like to hear about it.
+                            Whether it's a small experiment, a research idea,
+                            or a full product — I'd like to hear about it.
                         </p>
                     </div>
                     <div class="contact-right">
@@ -248,7 +285,83 @@
         </div>
     </div>
 
-    <script type="module" src="scene.js?v=8"></script>
-    <script src="script.js?v=8"></script>
+    <!-- PROJECT MODAL -->
+    <div class="modal" id="project-modal" aria-hidden="true">
+        <div class="modal-backdrop" data-close></div>
+        <div class="modal-inner modal-inner-lg" role="dialog" aria-modal="true">
+            <button class="modal-close" data-close aria-label="Close">✕</button>
+            <div class="modal-head">
+                <div class="modal-head-num" id="modal-num">01</div>
+                <div class="modal-head-body">
+                    <h2 class="modal-title" id="modal-title">Project</h2>
+                    <div class="modal-meta">
+                        <span class="modal-status" id="modal-status">status</span>
+                        <span class="modal-status-alt" id="modal-year">2025</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-preview" id="modal-preview"></div>
+            <p class="modal-desc" id="modal-desc"></p>
+            <div class="modal-grid">
+                <div class="modal-col">
+                    <div class="modal-col-head">Key features</div>
+                    <ul class="modal-list" id="modal-features"></ul>
+                </div>
+                <div class="modal-col">
+                    <div class="modal-col-head">Stack</div>
+                    <div class="modal-chips" id="modal-chips"></div>
+                </div>
+            </div>
+            <div class="modal-foot">
+                <span class="modal-foot-note" id="modal-foot-note">Private / In Development</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- LAB MODAL -->
+    <div class="modal" id="lab-modal" aria-hidden="true">
+        <div class="modal-backdrop" data-close></div>
+        <div class="modal-inner modal-inner-xl" role="dialog" aria-modal="true">
+            <button class="modal-close" data-close aria-label="Close">✕</button>
+            <div class="modal-head">
+                <div class="modal-head-num" id="lab-num">01</div>
+                <div class="modal-head-body">
+                    <h2 class="modal-title" id="lab-title">Category</h2>
+                    <div class="modal-meta">
+                        <span class="modal-status" id="lab-status">ready</span>
+                    </div>
+                </div>
+            </div>
+            <div class="lab-editor">
+                <div class="lab-editor-bar">
+                    <span class="lab-dot"></span>
+                    <span class="lab-dot"></span>
+                    <span class="lab-dot"></span>
+                    <span class="lab-editor-file" id="lab-file">main.py</span>
+                    <button class="lab-run-btn" id="lab-run">
+                        <span class="lab-run-icon">▶</span>
+                        <span>Run</span>
+                    </button>
+                </div>
+                <div class="lab-editor-body">
+                    <div class="lab-gutter" id="lab-gutter"></div>
+                    <pre class="lab-code" id="lab-code"></pre>
+                </div>
+            </div>
+            <div class="lab-output">
+                <div class="lab-output-bar">
+                    <span>Output</span>
+                    <span class="lab-output-status" id="lab-output-status">idle</span>
+                </div>
+                <pre class="lab-output-body" id="lab-output-body"><span class="lab-output-idle">— press Run to execute —</span></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Only ONE set of scripts, all with v=6, all inside <body> -->
+    <script type="module" src="scene.js?v=6"></script>
+    <script src="mockups.js?v=6"></script>
+    <script src="lab.js?v=6"></script>
+    <script src="script.js?v=6"></script>
 </body>
 </html>
