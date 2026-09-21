@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { IS_MOBILE, MAX_DPR } from '../performance/device.js';
 
 export class SceneManager {
     constructor(canvas) {
@@ -6,12 +7,13 @@ export class SceneManager {
 
         this.renderer = new THREE.WebGLRenderer({
             canvas,
-            antialias: true,
+            // MSAA on a phone costs more than it is worth at 1.5x DPR.
+            antialias: !IS_MOBILE,
             alpha: false,
             powerPreference: 'high-performance'
         });
         this.renderer.setClearColor(0x05060a, 1);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_DPR));
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 1.35;
@@ -38,6 +40,6 @@ export class SceneManager {
         this.camera.aspect = w / h;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(w, h);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_DPR));
     }
 }

@@ -9,6 +9,8 @@ export class Drone {
     constructor(opts = {}) {
         this.accent = new THREE.Color(opts.color ?? 0x4d8bf5);
         this.scaleMul = opts.scale ?? 1.0;
+        this.carrier  = opts.carrier === true;
+        this.load     = 0;   // 0..1, how hard it is working
 
         this.group = new THREE.Group();
         this.group.visible = false;
@@ -194,6 +196,116 @@ export class Drone {
         this.light = new THREE.PointLight(this.accent.getHex(), 0.9, 1.8, 2);
         this.light.position.set(0, -0.08, 0.2);
         this.group.add(this.light);
+
+        if (this.carrier) this._buildCarrier();
+    }
+
+    /* Carrier variant — a real airframe instead of a pointer.
+       Adds arms, four spinning rotors, skids and nav lights, and
+       hides the parts that only make sense on a cursor. */
+    _buildCarrier() {
+        // Cursor-only parts off
+        [this.eyeL, this.eyeR, this.eyeGlowL, this.eyeGlowR,
+         this.beam, this.targetDot, this.halo2,
+         this.finL, this.finR].forEach(o => { if (o) o.visible = false; });
+
+        const frameMat = new THREE.MeshStandardMaterial({
+            color: 0x2e343f, metalness: 0.92, roughness: 0.3,
+            emissive: 0x0a1220, emissiveIntensity: 0.35
+        });
+
+        this.rotors = [];
+        this.navLights = [];
+
+        const ARM_R = 0.30;
+        for (let i = 0; i < 4; i++) {
+            const a = Math.PI / 4 + i * Math.PI / 2;
+            const cx = Math.cos(a) * ARM_R;
+            const cz = Math.sin(a) * ARM_R;
+
+            // Arm out to the motor
+            const arm = new THREE.Mesh(
+                new THREE.BoxGeometry(ARM_R, 0.022, 0.030), frameMat
+            );
+            arm.position.set(cx * 0.5, -0.012, cz * 0.5);
+            arm.rotation.y = -a;
+            this.group.add(arm);
+
+            // Motor pod
+            const motor = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.038, 0.044, 0.055, 12), frameMat
+            );
+            motor.position.set(cx, 0.004, cz);
+            this.group.add(motor);
+
+            // Blade pair — this is what actually spins
+            const blades = new THREE.Group();
+            blades.position.set(cx, 0.042, cz);
+            const bladeGeo = new THREE.BoxGeometry(0.26, 0.005, 0.030);
+            const bladeMat = new THREE.MeshStandardMaterial({
+                color: 0x525a68, metalness: 0.8, roughness: 0.4
+            });
+            const b1 = new THREE.Mesh(bladeGeo, bladeMat);
+            const b2 = new THREE.Mesh(bladeGeo, bladeMat);
+            b2.rotation.y = Math.PI / 2;
+            blades.add(b1, b2);
+            this.group.add(blades);
+
+            // Disc that sells the spin
+            const disc = new THREE.Mesh(
+                new THREE.CircleGeometry(0.145, 28),
+                new THREE.MeshBasicMaterial({
+                    color: this.accent, transparent: true, opacity: 0.19,
+                    side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+                    depthWrite: false, toneMapped: false
+                })
+            );
+            disc.rotation.x = -Math.PI / 2;
+            disc.position.set(cx, 0.046, cz);
+            this.group.add(disc);
+
+            this.rotors.push({ blades, disc, dir: (i % 2) ? 1 : -1 });
+        }
+
+        // Landing skids
+        const skidMat = new THREE.MeshStandardMaterial({
+            color: 0x232935, metalness: 0.85, roughness: 0.4
+        });
+        [-0.11, 0.11].forEach(sx => {
+            const skid = new THREE.Mesh(new THREE.BoxGeometry(0.020, 0.016, 0.34), skidMat);
+            skid.position.set(sx, -0.175, 0);
+            this.group.add(skid);
+            [-0.11, 0.11].forEach(sz => {
+                const leg = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.10, 0.016), skidMat);
+                leg.position.set(sx, -0.125, sz);
+                this.group.add(leg);
+            });
+        });
+
+        // Nav lights — port red, starboard green, white strobe aft
+        const nav = (colour, x, z, strobe) => {
+            const m = new THREE.Mesh(
+                new THREE.SphereGeometry(0.022, 10, 8),
+                new THREE.MeshBasicMaterial({ color: colour, toneMapped: false })
+            );
+            m.position.set(x, -0.04, z);
+            this.group.add(m);
+
+            const g = new THREE.Mesh(
+                new THREE.SphereGeometry(0.055, 10, 8),
+                new THREE.MeshBasicMaterial({
+                    color: colour, transparent: true, opacity: 0.4,
+                    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+                })
+            );
+            g.position.copy(m.position);
+            this.group.add(g);
+
+            this.navLights.push({ mesh: m, glow: g, strobe });
+        };
+        nav(0xff4d4d, -0.20, 0.14, false);
+        nav(0x3fca7d,  0.20, 0.14, false);
+        nav(0xffffff,  0.00, -0.26, true);
     }
 
     // ── API ──
@@ -202,6 +314,8 @@ export class Drone {
     getPosition() { return this.group.position; }
     setVisible(v) { this.group.visible = v; }
     setPress(p) { this.targetPress = Math.max(0, Math.min(1, p)); }
+    /* Rotors spin up and discs brighten under load. */
+    setLoad(l) { this.load = Math.max(0, Math.min(1.6, l)); }
     getPress() { return this.press; }
 
     setColor(hex) {
@@ -214,6 +328,9 @@ export class Drone {
         this.antennaGlow.material.color.copy(this.accent);
         this.ripple.material.color.copy(this.accent);
         this.light.color.copy(this.accent);
+        if (this.rotors) {
+            for (const r of this.rotors) r.disc.material.color.copy(this.accent);
+        }
     }
 
     // Blow the drone apart into debris
@@ -329,8 +446,11 @@ export class Drone {
         const dip = this.press * 0.14;
 
         this.bodyGroup.position.y = hoverBob - dip;
-        this.bodyGroup.rotation.y = Math.sin(t * 0.7) * 0.35;
-        this.bodyGroup.rotation.z = Math.sin(t * 1.4) * 0.06;
+        // A carrier banks as a whole airframe (the rig drives that),
+        // so its body barely moves inside the frame.
+        const wob = this.carrier ? 0.12 : 1.0;
+        this.bodyGroup.rotation.y = Math.sin(t * 0.7) * 0.35 * wob;
+        this.bodyGroup.rotation.z = Math.sin(t * 1.4) * 0.06 * wob;
 
         this.halo.rotation.z = t * 1.2;
         this.halo2.rotation.y = t * 0.8;
@@ -366,6 +486,20 @@ export class Drone {
 
         this.light.intensity = 0.7 + pulse * 0.25 + this.press * 1.8;
         this.group.scale.setScalar(this.scaleMul * (1 + this.press * 0.08));
+
+        // Carrier: spin the rotors and blink the strobe
+        if (this.rotors) {
+            for (const r of this.rotors) {
+                r.blades.rotation.y += r.dir * (34 + this.load * 46) * dt;
+                r.disc.material.opacity = 0.14 + pulse * 0.05 + this.load * 0.13;
+            }
+            const strobeOn = (t % 1.4) < 0.09;
+            for (const n of this.navLights) {
+                if (!n.strobe) continue;
+                n.mesh.visible = strobeOn;
+                n.glow.visible = strobeOn;
+            }
+        }
     }
 
     // Soft check — allows multiple explosions in the same lifetime

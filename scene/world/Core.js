@@ -1,11 +1,18 @@
 import * as THREE from 'three';
 
+/* The core sat at y = 0 with a radius of 0.7, and WetFloor sits at
+   y = 0.55 -- so most of it was underwater and all you saw was a dome
+   poking through. Up here it floats clear of the water and gets a
+   reflection in it. */
+const CORE_Y = 1.95;
+
 export class Core {
     constructor(scene) {
         this.scene = scene;
         this.elapsed = 0;
 
         this.group = new THREE.Group();
+        this.group.position.set(0, CORE_Y, 0);
         scene.add(this.group);
 
         this.currentColor = new THREE.Color(0x4d8bf5);
@@ -132,6 +139,36 @@ export class Core {
         this.flareTime = 0;
         this.flareActive = false;
         this.flareDuration = 0.65;
+
+        // ── A loose shell of shards, so it is an object and not a ball ──
+        // Placed on a Fibonacci sphere so they never line up into rings,
+        // and they breathe in and out. A whump throws them outward.
+        this.shards = new THREE.Group();
+        this.shardMat = new THREE.MeshBasicMaterial({
+            color: 0x4d8bf5,
+            transparent: true,
+            opacity: 0.34,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+        const shardGeo = new THREE.TetrahedronGeometry(0.115, 0);
+        this.shardList = [];
+        const N = 18;
+        for (let i = 0; i < N; i++) {
+            const m = new THREE.Mesh(shardGeo, this.shardMat);
+            const a = i * 2.39996;                      // golden angle
+            const y = 1 - (i / (N - 1)) * 2;            // -1 .. 1
+            const r = Math.sqrt(Math.max(0, 1 - y * y));
+            this.shardList.push({
+                mesh: m,
+                dir: new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r),
+                base: 1.18 + (i % 3) * 0.17,
+                spin: 0.4 + (i % 5) * 0.22,
+                phase: i * 1.7
+            });
+            this.shards.add(m);
+        }
+        this.group.add(this.shards);
     }
 
     setAccentColor(hex) {
@@ -179,6 +216,21 @@ export class Core {
 
         // Halo breathing
         this.haloMat.opacity = 0.05 + Math.sin(this.elapsed * 0.5) * 0.02 + pulse * 0.15;
+
+        // Float, so the reflection in the water moves
+        this.group.position.y = CORE_Y + Math.sin(this.elapsed * 0.45) * 0.14;
+
+        // Shard shell: turns slowly, breathes, and blows outward on a whump
+        this.shards.rotation.y += dt * 0.16;
+        this.shards.rotation.x = Math.sin(this.elapsed * 0.21) * 0.20;
+        this.shardMat.color.copy(this.currentColor);
+        this.shardMat.opacity = 0.34 + Math.sin(this.elapsed * 0.7) * 0.08 + pulse * 0.5;
+        for (const s of this.shardList) {
+            const r = s.base + Math.sin(this.elapsed * 0.55 + s.phase) * 0.16 + pulse * 0.9;
+            s.mesh.position.copy(s.dir).multiplyScalar(r);
+            s.mesh.rotation.x += dt * s.spin;
+            s.mesh.rotation.z += dt * s.spin * 0.7;
+        }
 
         // Ring expansion
         if (this.ringActive) {

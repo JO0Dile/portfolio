@@ -99,6 +99,50 @@ function drawFallback(ctx, W, H, t, title) {
     drawChrome(ctx, W, title || 'panel', '● IDLE', '#4a525c');
 }
 
+/* How each project is presented in space. PanelRig supplies the
+   attitude; this supplies the shape. Anything not listed is flat. */
+const PANEL_FORM = {
+    languages:  'portrait',   // E - code is a tall thing, not a wide one
+    frameworks: 'curved'      // I - wraps around you
+};
+/* Bends a plane back around a vertical axis so its far edges wrap
+   away from the viewer. UVs survive the bend, so the canvas still
+   maps onto it normally. */
+function bendPlane(geo, radius) {
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const a = x / radius;
+        pos.setX(i, Math.sin(a) * radius);
+        pos.setZ(i, pos.getZ(i) + (Math.cos(a) - 1) * radius);
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    return geo;
+}
+
+function makeScreenTexture(canvas) {
+    const t = new THREE.CanvasTexture(canvas);
+    t.minFilter = THREE.LinearFilter;
+    t.magFilter = THREE.LinearFilter;
+    t.generateMipmaps = false;
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+}
+
+/* The portrait form is the canvas cut exactly in half, no overlap:
+   the top plate is the source and the bottom plate is what that source
+   produced. drawLanguages lays the canvas out to match -- editor above
+   the midline, terminal below it -- so the two plates are two different
+   things rather than the same thing twice, which is what made the first
+   two attempts look like a duplicate.
+
+   UV terms, v counting up from the bottom. x is capped at 56% because
+   that is all the portrait plate shows, so drawLanguages keeps every
+   box inside x < 732. */
+const PORTRAIT_TOP = { x: 0.012, y: 0.50, w: 0.56, h: 0.50 };
+const PORTRAIT_BOT = { x: 0.012, y: 0.00, w: 0.56, h: 0.50 };
+
 const PANEL_SPECS = [
     { key: 'about',       title: 'about.md',     fn: () => typeof drawAbout        === 'function' ? drawAbout        : null },
     { key: 'aaup',        title: 'aaup-planner', fn: () => typeof drawAAUP         === 'function' ? drawAAUP         : null },
@@ -118,6 +162,13 @@ export class ProjectPanels {
         this.index = -1;
         this.opacity = 0;
         this.redrawAcc = 0;
+
+        // Written by PanelRig so the drones can actually carry the
+        // panel rather than hover beside a fixed one.
+        this.rigOffset = new THREE.Vector3();
+        this.rigRoll  = 0;
+        this.rigPitch = 0;
+        this.rigYaw   = 0;
         this.frameInterval = 1 / FPS_BY_LEVEL.high;
         this.panels = PANEL_SPECS.map((spec, i) => this._buildPanel(spec, i));
         this.count = this.panels.length;
@@ -134,15 +185,44 @@ export class ProjectPanels {
         canvas.height = CANVAS_H;
         const ctx = canvas.getContext('2d', { alpha: false });
 
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.minFilter = THREE.LinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        texture.generateMipmaps = false;
-        texture.colorSpace = THREE.SRGBColorSpace;
+        const form = PANEL_FORM[spec.key] || 'flat';
+        const built = this['_form_' + form](canvas);
 
+        const group = new THREE.Group();
+        group.add(built.glow, ...built.backs, ...built.screens);
+        group.position.set(0, PANEL_Y, PANEL_Z);
+        group.visible = false;
+        group.renderOrder = 12;
+        this.scene.add(group);
+
+        const panel = {
+            index, key: spec.key, title: spec.title, form,
+            canvas, ctx, group,
+            textures: built.textures,
+            screens:  built.screens,
+            backs:    built.backs,
+            glow:     built.glow,
+            halfW:    built.halfW,
+            halfH:    built.halfH,
+            draw: spec.fn(),
+            localTime: 0, dormant: true, broken: false
+        };
+        this._paint(panel);
+        return panel;
+    }
+
+    /* ---- forms -------------------------------------------------
+       Each returns { screens, backs, glow, textures, halfW, halfH }.
+       halfW / halfH are what PanelRig hangs its grip points off, so a
+       tall panel gets gripped top-and-bottom rather than corner to
+       corner without anyone having to say so.
+       ------------------------------------------------------------ */
+
+    _form_flat(canvas) {
+        const tex = makeScreenTexture(canvas);
         const screen = new THREE.Mesh(
             new THREE.PlaneGeometry(PANEL_W, PANEL_H),
-            new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 0, depthWrite: false, toneMapped: false })
+            new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false, toneMapped: false })
         );
         const bezel = new THREE.Mesh(
             new THREE.PlaneGeometry(PANEL_W + 0.16, PANEL_H + 0.16),
@@ -156,33 +236,112 @@ export class ProjectPanels {
         );
         glow.position.z = -0.024;
 
-        const group = new THREE.Group();
-        group.add(glow, bezel, screen);
-        group.position.set(0, PANEL_Y, PANEL_Z);
-        group.visible = false;
-        group.renderOrder = 12;
-        this.scene.add(group);
-
-        const panel = {
-            index, key: spec.key, title: spec.title,
-            canvas, ctx, texture, group, screen, bezel, glow,
-            draw: spec.fn(),
-            localTime: 0, dormant: true, broken: false
+        return {
+            screens: [screen], backs: [bezel], glow, textures: [tex],
+            halfW: PANEL_W / 2, halfH: PANEL_H / 2
         };
-        this._paint(panel);
-        return panel;
+    }
+
+    /* E - portrait. The canvas stays 1280x800 so no draw function has
+       to change. Two crops of it, stacked, both magnified about 1.8x:
+       the upper half of the document on top, the lower half below. */
+    _form_portrait(canvas) {
+        const PW = 6.0;
+        const PH = 7.0;
+        const SW = PW - 0.30;
+        const SH = SW * (PORTRAIT_TOP.h * CANVAS_H) / (PORTRAIT_TOP.w * CANVAS_W);
+        const gapY = SH / 2 + 0.09;
+
+        const crop = (spec) => {
+            const t = makeScreenTexture(canvas);
+            t.wrapS = THREE.ClampToEdgeWrapping;
+            t.wrapT = THREE.ClampToEdgeWrapping;
+            t.repeat.set(spec.w, spec.h);
+            t.offset.set(spec.x, spec.y);
+            return t;
+        };
+
+        const fullTex = crop(PORTRAIT_TOP);
+        const full = new THREE.Mesh(
+            new THREE.PlaneGeometry(SW, SH),
+            new THREE.MeshBasicMaterial({ map: fullTex, transparent: true, opacity: 0, depthWrite: false, toneMapped: false })
+        );
+        full.position.set(0, gapY, 0);
+
+        const detailTex = crop(PORTRAIT_BOT);
+        const detail = new THREE.Mesh(
+            new THREE.PlaneGeometry(SW, SH),
+            new THREE.MeshBasicMaterial({ map: detailTex, transparent: true, opacity: 0, depthWrite: false, toneMapped: false })
+        );
+        detail.position.set(0, -gapY, 0);
+
+        // A hairline between the two, so it reads as one device with a
+        // detail view rather than two panels stuck together.
+        const rule = new THREE.Mesh(
+            new THREE.PlaneGeometry(SW * 0.5, 0.025),
+            new THREE.MeshBasicMaterial({ color: 0x27384f, transparent: true, opacity: 0, depthWrite: false })
+        );
+        rule.position.set(0, 0, 0.004);
+
+        const bezel = new THREE.Mesh(
+            new THREE.PlaneGeometry(PW + 0.16, PH + 0.16),
+            new THREE.MeshBasicMaterial({ color: 0x0a1220, transparent: true, opacity: 0, depthWrite: false })
+        );
+        bezel.position.z = -0.012;
+
+        const glow = new THREE.Mesh(
+            new THREE.PlaneGeometry(PW + 0.9, PH + 0.9),
+            new THREE.MeshBasicMaterial({ color: 0x4d8bf5, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending })
+        );
+        glow.position.z = -0.024;
+
+        return {
+            screens: [full, detail], backs: [bezel, rule], glow,
+            textures: [fullTex, detailTex],
+            halfW: PW / 2, halfH: PH / 2
+        };
+    }
+
+    /* I - bent around the viewer. The cost is that whatever is drawn
+       near the edges curves with them; that is inherent to the shape,
+       not a bug to be tuned out. */
+    _form_curved(canvas) {
+        const R = PANEL_W * 0.78;
+        const tex = makeScreenTexture(canvas);
+
+        const screen = new THREE.Mesh(
+            bendPlane(new THREE.PlaneGeometry(PANEL_W, PANEL_H, 48, 1), R),
+            new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false, toneMapped: false, side: THREE.DoubleSide })
+        );
+        const bezel = new THREE.Mesh(
+            bendPlane(new THREE.PlaneGeometry(PANEL_W + 0.16, PANEL_H + 0.16, 48, 1), R),
+            new THREE.MeshBasicMaterial({ color: 0x0a1220, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide })
+        );
+        bezel.position.z = -0.014;
+
+        const glow = new THREE.Mesh(
+            bendPlane(new THREE.PlaneGeometry(PANEL_W + 0.9, PANEL_H + 0.9, 48, 1), R),
+            new THREE.MeshBasicMaterial({ color: 0x4d8bf5, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide })
+        );
+        glow.position.z = -0.03;
+
+        const halfAngle = (PANEL_W / 2) / R;
+        return {
+            screens: [screen], backs: [bezel], glow, textures: [tex],
+            halfW: Math.sin(halfAngle) * R, halfH: PANEL_H / 2
+        };
     }
 
     _paint(panel) {
         const { ctx } = panel;
-        _handTarget.visible = false;    // ← ADD THIS LINE
+        _handTarget.visible = false;
         try {
             if (panel.draw && !panel.broken) panel.draw(ctx, CANVAS_W, CANVAS_H, panel.localTime);
             else drawFallback(ctx, CANVAS_W, CANVAS_H, panel.localTime, panel.title);
         } catch (err) {
         
         }
-        panel.texture.needsUpdate = true;
+        for (const t of panel.textures) t.needsUpdate = true;
     }
 
     setActive(index) {
@@ -201,10 +360,33 @@ export class ProjectPanels {
         this.opacity = clamp01(o);
         const p = this.panels[this.index];
         if (!p) return;
-        p.screen.material.opacity = this.opacity;
-        p.bezel.material.opacity = this.opacity * 0.92;
+        for (const s of p.screens) {
+            s.material.opacity = this.opacity * (s.userData.opacityMul || 1);
+        }
+        for (const b of p.backs) {
+            b.material.opacity = this.opacity * 0.92 * (b.userData.opacityMul || 1);
+        }
         p.glow.material.opacity = this.opacity * 0.30;
         p.group.visible = this.opacity >= 0.02;
+    }
+
+    /* PanelRig calls this every frame. pitch / yaw / roll are applied
+       on top of facing the camera, so passing 0, 0, 0 gives exactly the
+       square-on panel this used to be. */
+    setRig(x, y, z, roll, pitch, yaw) {
+        this.rigOffset.set(x, y, z);
+        this.rigRoll  = roll  || 0;
+        this.rigPitch = pitch || 0;
+        this.rigYaw   = yaw   || 0;
+    }
+
+    /* And reads the result back out. PanelRig puts its grip points on
+       the panel's real corners, so it needs the real orientation and
+       the real size, which differ per form. */
+    getRigFrame() {
+        const p = this.panels[this.index];
+        if (!p) return null;
+        return { quat: p.group.quaternion, halfW: p.halfW, halfH: p.halfH, form: p.form };
     }
 
     setAccentColor(hex) {
@@ -225,9 +407,20 @@ export class ProjectPanels {
         } else if (!p.dormant) {
             p.dormant = true;
         }
-        if (!p.group.visible) return;
+        // Oriented even while hidden. PanelRig reads this quaternion
+        // back every frame to place its grip points, and a stale one
+        // would send the drones to the wrong corners on the first frame
+        // of a fade-in.
         p.group.lookAt(camera.position);
-        p.group.position.y = PANEL_Y + Math.sin(elapsed * 0.6) * 0.045;
+        p.group.rotateY(this.rigYaw);
+        p.group.rotateX(this.rigPitch);
+        p.group.rotateZ(this.rigRoll);
+        p.group.position.set(
+            this.rigOffset.x,
+            PANEL_Y + this.rigOffset.y + Math.sin(elapsed * 0.6) * 0.045,
+            PANEL_Z + this.rigOffset.z
+        );
+        p.group.updateMatrixWorld();
     }
 }
 
@@ -1121,8 +1314,8 @@ function drawAIMaze(ctx, W, H, t) {
     const holding = stepIdx >= totalSteps;
 
     drawChrome(ctx, W,
-        'aimaze · maze ' + (mazeIdx + 1) + ' / ' + AIMAZE_MAZES.length,
-        '● TRAINING');
+        'aimaze · Cubi v3.0 · MazeCube.onnx',
+        '● MAZE ' + (mazeIdx + 1) + ' / ' + AIMAZE_MAZES.length);
 
     // Top bar
     const barX = 40, barY = 90, barW = W - 80, barH = 48;
@@ -1136,7 +1329,7 @@ function drawAIMaze(ctx, W, H, t) {
     ctx.fillStyle = '#4a525c';
     ctx.font = '600 13px "JetBrains Mono", monospace';
     ctx.fillText(
-        'ML-AGENTS · POLICY : PPO · MAZE ' + (mazeIdx + 1) + '/' + AIMAZE_MAZES.length,
+        'PPO · 4 FANS × 13 RAYS × 18 CH · LSTM 256 · lr 3e-4 · beta 1.2e-2',
         barX + 24, barY + 30
     );
 
@@ -1144,6 +1337,14 @@ function drawAIMaze(ctx, W, H, t) {
     ctx.font = '600 13px "JetBrains Mono", monospace';
     const liveW = ctx.measureText('● RUNNING').width;
     ctx.fillText('● RUNNING', barX + barW - 24 - liveW, barY + 30);
+
+    // The point of the project, stated plainly.
+    ctx.fillStyle = '#5a616b';
+    ctx.font = '500 14px "Inter", sans-serif';
+    ctx.fillText(
+        'It has never seen this maze, and it never gets the view you are looking at — only the rays.',
+        barX + 2, barY + barH + 30
+    );
 
     // Grid geometry
     const cols = 12, rows = 8;
@@ -1219,6 +1420,57 @@ function drawAIMaze(ctx, W, H, t) {
         stepEase
     );
 
+    // ── What Cubi actually sees ──
+    // The real model takes four fans of 13 rays, 18 channels each, and
+    // is never given the goal's position or a map. Drawing the fan is
+    // the only honest way to show that the thing solving this maze
+    // cannot see the picture you are looking at.
+    const RAYS = 13;
+    const RAY_SPREAD = Math.PI * 0.64;
+    const RAY_MAX = cell * 5.2;
+    const acx = ax + cell / 2;
+    const acy = ay + cell / 2;
+
+    let heading = Math.atan2(nxtStep[1] - curStep[1], nxtStep[0] - curStep[0]);
+    if (nxtStep[0] === curStep[0] && nxtStep[1] === curStep[1]) {
+        heading = Math.sin(t * 0.7) * Math.PI;      // arrived, still looking around
+    }
+
+    const solidAt = (px, py) => {
+        const c = Math.floor((px - mx) / (cell + gap));
+        const r = Math.floor((py - my) / (cell + gap));
+        if (c < 0 || r < 0 || c >= cols || r >= rows) return true;
+        return maze.walls[r][c] === 1;
+    };
+
+    for (let i = 0; i < RAYS; i++) {
+        const a = heading + (i / (RAYS - 1) - 0.5) * RAY_SPREAD;
+        const dx = Math.cos(a), dy = Math.sin(a);
+
+        let d = cell * 0.42;
+        while (d < RAY_MAX && !solidAt(acx + dx * d, acy + dy * d)) d += 5;
+
+        const hit = d < RAY_MAX;
+        const rx = acx + dx * d, ry = acy + dy * d;
+        const fade = 1 - d / RAY_MAX;
+
+        ctx.strokeStyle = hit
+            ? 'rgba(255,190,92,' + (0.16 + fade * 0.26).toFixed(3) + ')'
+            : 'rgba(124,176,255,0.16)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(acx, acy);
+        ctx.lineTo(rx, ry);
+        ctx.stroke();
+
+        if (hit) {
+            ctx.fillStyle = 'rgba(255,190,92,0.7)';
+            ctx.beginPath();
+            ctx.arc(rx, ry, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
     const agGrad = ctx.createLinearGradient(ax, ay, ax, ay + cell);
     agGrad.addColorStop(0, '#7cb0ff');
     agGrad.addColorStop(1, '#4d8bf5');
@@ -1277,215 +1529,300 @@ function drawAIMaze(ctx, W, H, t) {
     });
 }
 // ── 06 · LANGUAGES — with popups ─────────────────────────
+/* The editor half was one flat grey while the terminal half was
+   coloured, and flat grey is what made it unreadable next to it. This
+   is the smallest tokenizer that fixes that: comments dim, strings
+   green, numbers warm, keywords in the file's own accent. */
+const CODE_KEYWORDS = new Set([
+    'import', 'from', 'class', 'def', 'return', 'if', 'else', 'for', 'while',
+    'in', 'const', 'let', 'var', 'function', 'func', 'enum', 'case', 'object',
+    'fun', 'val', 'export', 'new', 'struct', 'true', 'false', 'null', 'None',
+    'self', 'String', 'Long', 'Int', 'float', 'str', 'dataclass'
+]);
+
+function drawCodeLine(ctx, text, x, y, accent) {
+    const trimmed = text.trim();
+    if (trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('///')) {
+        ctx.fillStyle = '#7286a0';
+        ctx.fillText(text, x, y);
+        return;
+    }
+
+    // A trailing comment, but only if it is not inside a string.
+    let head = text, tail = '';
+    for (const mark of ['//', '#']) {
+        const ci = text.indexOf(mark);
+        if (ci > 0 && (text.slice(0, ci).split('"').length - 1) % 2 === 0) {
+            head = text.slice(0, ci);
+            tail = text.slice(ci);
+            break;
+        }
+    }
+
+    let cx = x;
+    for (const part of head.split(/("[^"]*"|[A-Za-z_]\w*|\d[\w.\-]*)/)) {
+        if (!part) continue;
+        let col = '#e9edf4';
+        if (part[0] === '"') col = '#8fd9a8';
+        else if (CODE_KEYWORDS.has(part)) col = accent;
+        else if (/^\d/.test(part)) col = '#ffbe5c';
+        ctx.fillStyle = col;
+        ctx.fillText(part, cx, y);
+        cx += ctx.measureText(part).width;
+    }
+
+    if (tail) {
+        ctx.fillStyle = '#7286a0';
+        ctx.fillText(tail, cx, y);
+    }
+}
+
 function drawLanguages(ctx, W, H, t) {
     ctx.fillStyle = '#0a0e14';
     ctx.fillRect(0, 0, W, H);
-    drawChrome(ctx, W, 'languages · editor', '● EDITING');
 
+    /* Real code from the four repos, and the real thing each one does.
+       Nothing invented: the comments are lifted off disk, because the
+       comments are the part that says how he works.
+
+       The canvas is laid out for the portrait plate: the top half is
+       the source, the bottom half is the output, and everything stays
+       inside x < 714 because that is all the plate crops. */
     const files = [
-        { name: 'main.py',   accent: '#4d8bf5', code: [
-            '# ── python ────────────',
-            'import torch',
-            'from agent import PPO',
-            '',
-            'def train(env):',
-            '    agent = PPO(env)',
-            '    for epoch in range(100):',
-            '        agent.step()',
-            '    return agent'
-        ], popups: [
-            { t: 'Torch imported', icon: '✓', color: '#3fca7d' },
-            { t: 'Agent initialized', icon: '✓', color: '#3fca7d' },
-            { t: 'Training · 100 epochs', icon: '⏵', color: '#4d8bf5' }
-        ]},
-        { name: 'core.cpp', accent: '#ff8a5c', code: [
-            '// ── c++ ──────────────',
-            '#include <iostream>',
-            '#include <vector>',
-            '',
-            'int main() {',
-            '    std::cout << "ready\\n";',
-            '    return 0;',
-            '}'
-        ], popups: [
-            { t: 'Compiling...', icon: '⏵', color: '#4d8bf5' },
-            { t: 'Build succeeded', icon: '✓', color: '#3fca7d' },
-            { t: 'Binary: 12.4 KB', icon: '◆', color: '#ff8a5c' }
-        ]},
-        { name: 'app.js',   accent: '#ffbe5c', code: [
-            '// ── js ───────────────',
-            'const server = new Server();',
-            '',
-            'server.use("/api", router);',
-            'server.listen(3000);'
-        ], popups: [
-            { t: 'Dependencies loaded', icon: '✓', color: '#3fca7d' },
-            { t: 'Server on :3000', icon: '◆', color: '#ffbe5c' },
-            { t: 'Ready for requests', icon: '⏵', color: '#4d8bf5' }
-        ]},
-        { name: 'query.sql', accent: '#b07cff', code: [
-            '-- ── sql ────────────',
-            'SELECT player,',
-            '       AVG(score) AS avg',
-            'FROM scores',
-            'GROUP BY player',
-            'ORDER BY avg DESC;'
-        ], popups: [
-            { t: 'Query compiled', icon: '✓', color: '#3fca7d' },
-            { t: '3 rows · 4ms', icon: '◆', color: '#b07cff' },
-            { t: 'Cached for 60s', icon: '✓', color: '#3fca7d' }
-        ]}
+        {
+            name: 'proposer.py', lang: 'PYTHON', accent: '#4d8bf5', repo: 'RL-Scientist',
+            code: [
+                '# rl_scientist/agent/proposer.py',
+                '# The local LLM proposes one change at a time.',
+                'OLLAMA_URL = "localhost:11434/api/generate"',
+                'DEFAULT_MODEL = "qwen2.5:7b"',
+                '',
+                '@dataclass',
+                'class Proposal:',
+                '    parameter: str',
+                '    value: float | int',
+                '    confidence: str'
+            ],
+            cmd: 'python -m rl_scientist run --episodes 500',
+            out: [
+                ['proposal   lr   3e-4  ->  1e-4', '#b0b8c4'],
+                ['reason     reward plateaued at 381', '#5a616b'],
+                ['whitelist  ok, 1 parameter', '#5a616b'],
+                ['running experiment 14 ...', '#5a616b'],
+                ['score 412.7   (was 381.2)', '#ededf0'],
+                ['kept', '#3fca7d']
+            ]
+        },
+        {
+            name: 'HireCost.kt', lang: 'KOTLIN', accent: '#ff8a5c', repo: 'Construction-trades',
+            code: [
+                '// core/money/HireCost.kt',
+                'object HireCost {',
+                '  // Part days count as whole days, because',
+                '  // hire companies charge that way.',
+                '  fun daysOnHire(start: Long?, end: Long?,',
+                '                 now: Long): Long {',
+                '    val until = minOf(end ?: now, now)',
+                '    if (until <= start) return 0L',
+                '    return ceilDays(until - start)',
+                '  }'
+            ],
+            cmd: 'daysOnHire(start = 3 Mar, end = 17 Mar, now = 2 Apr)',
+            out: [
+                ['machine went back Tue 17 Mar', '#b0b8c4'],
+                ['charging stops that day, not today', '#5a616b'],
+                ['14 days on hire', '#ededf0'],
+                ['hire bill and job sheet agree', '#3fca7d']
+            ]
+        },
+        {
+            name: 'Exporter.swift', lang: 'SWIFT', accent: '#ffbe5c', repo: 'TradesManager iOS',
+            code: [
+                '/// One type, not three exporters, so a CSV',
+                '/// and a PDF can never drift apart.',
+                'enum ExportDocument {',
+                '  case inventory([StockItem])',
+                '  case project(Project, tasks: [ProjectTask])',
+                '  case checklist(SafetyTemplate, run: Run)',
+                '',
+                '  func fileStem(_ loc: Localization) -> String',
+                '}'
+            ],
+            cmd: 'export .inventory(214 items)',
+            out: [
+                ['inventory-2026-04-02.csv     214 rows', '#b0b8c4'],
+                ['inventory-2026-04-02.pdf       9 pages', '#b0b8c4'],
+                ['one ExportDocument, both files', '#5a616b'],
+                ['spreadsheet and printout agree', '#3fca7d']
+            ]
+        },
+        {
+            name: 'ai-worker.js', lang: 'JAVASCRIPT', accent: '#b07cff', repo: 'AAUPath',
+            code: [
+                '// ai/cloudflare-worker.js',
+                '// Static site, so it cannot hold a key.',
+                '// This Worker is where the key lives.',
+                'const TIERS = [',
+                '  "gemini-flash-latest",       // ~250/day',
+                '  "gemini-flash-lite-latest",  // ~1k/day',
+                '  "@cf/meta/llama-3.1-8b"      // 10k/day',
+                '];',
+                '// Aliases, not pins. Pinned ones expire.'
+            ],
+            cmd: 'POST /ask',
+            out: [
+                ['tier 1   gemini-flash-latest      429', '#ff8a5c'],
+                ['tier 2   gemini-flash-lite        200', '#b0b8c4'],
+                ['answered in 1.4s', '#5a616b'],
+                ['the key never left the Worker', '#3fca7d']
+            ]
+        }
     ];
 
-    const FILE_DURATION = 6;
+    const FILE_DURATION = 7.5;
     const activeIdx = Math.floor(t / FILE_DURATION) % files.length;
-    const tabT = (t % FILE_DURATION);
+    const ft = t % FILE_DURATION;
     const file = files[activeIdx];
 
-    // Tabs
-    const tabW = 240;
+    drawChrome(ctx, W, 'languages \u00b7 ' + file.repo, '\u25cf ' + file.lang);
+
+    const LX = 34, LW = 680;           // everything lives inside the crop
+
+    // ================= TOP HALF - the source =================
+    const tabW = 160, tabGap = 10, tabY = 66, tabH = 42;
     files.forEach((f, i) => {
-        const tx = 40 + i * (tabW + 12);
+        const tx = LX + i * (tabW + tabGap);
         const isActive = i === activeIdx;
 
         ctx.fillStyle = isActive ? '#12151a' : 'transparent';
         ctx.strokeStyle = isActive ? f.accent : '#1a2028';
         ctx.lineWidth = isActive ? 1.5 : 1;
-        roundRect(ctx, tx, 76, tabW, 44, 6);
+        roundRect(ctx, tx, tabY, tabW, tabH, 6);
         ctx.fill();
         ctx.stroke();
 
-        ctx.fillStyle = isActive ? '#d0d4dc' : '#5a616b';
-        ctx.font = '600 14px "JetBrains Mono", monospace';
-        ctx.fillText(f.name, tx + 22, 104);
+        ctx.fillStyle = isActive ? '#f0f3f8' : '#6f7d8e';
+        ctx.font = '600 13px "JetBrains Mono", monospace';
+        ctx.fillText(f.name, tx + 14, tabY + 26);
 
         if (isActive) {
             ctx.fillStyle = f.accent;
             ctx.beginPath();
-            ctx.arc(tx + tabW - 18, 98, 4, 0, Math.PI * 2);
+            ctx.arc(tx + tabW - 14, tabY + 21, 3.5, 0, Math.PI * 2);
             ctx.fill();
         }
     });
 
-    // Editor
-    const ex = 40, ey = 138, ew = W - 80, editorH = 400;
-
-    ctx.fillStyle = '#0d1119';
-    ctx.strokeStyle = '#1a2028';
+    // Same near-black as the terminal below. The old lighter box was
+    // costing the code most of its contrast.
+    const ey = 118, eh = 272;
+    ctx.fillStyle = '#070b11';
+    ctx.strokeStyle = '#1d2632';
     ctx.lineWidth = 1.5;
-    roundRect(ctx, ex, ey, ew, editorH, 10);
+    roundRect(ctx, LX, ey, LW, eh, 10);
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = '#0a0e14';
-    ctx.fillRect(ex + 1, ey + 1, 60, editorH - 2);
+    ctx.fillStyle = '#04070b';
+    ctx.fillRect(LX + 1, ey + 1, 52, eh - 2);
 
     const code = file.code;
-    const lineDelay = 0.35;
-    const visibleLines = Math.min(code.length, Math.floor(tabT / lineDelay) + 1);
-    const lineH = 34;
+    const lineH = 26;
+    const lineDelay = 0.17;
+    const visibleLines = Math.min(code.length, Math.floor(ft / lineDelay) + 1);
 
     for (let i = 0; i < visibleLines; i++) {
-        const y = ey + 46 + i * lineH;
+        const y = ey + 34 + i * lineH;
 
-        ctx.fillStyle = '#3a4048';
-        ctx.font = '500 14px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#4d5866';
+        ctx.font = '500 13px "JetBrains Mono", monospace';
         ctx.textAlign = 'right';
-        ctx.fillText(String(i + 1), ex + 50, y);
+        ctx.fillText(String(i + 1), LX + 42, y);
         ctx.textAlign = 'left';
 
-        const lineU = clamp01((tabT - i * lineDelay) * 5);
-        ctx.globalAlpha = easeOutCubic(lineU);
-
-        const text = code[i];
-        const isCmt = text.trim().startsWith('//') || text.trim().startsWith('#') || text.trim().startsWith('--');
-        ctx.fillStyle = isCmt ? '#4a525c' : '#d0d4dc';
+        ctx.globalAlpha = easeOutCubic(clamp01((ft - i * lineDelay) * 6));
         ctx.font = '500 16px "JetBrains Mono", monospace';
-        ctx.fillText(text, ex + 80, y);
+        drawCodeLine(ctx, code[i], LX + 66, y, file.accent);
         ctx.globalAlpha = 1;
     }
 
-    // Cursor at end
-    if (Math.sin(tabT * 8) > 0 && visibleLines > 0 && visibleLines <= code.length) {
-        const lastLine = code[visibleLines - 1] || '';
-        const cursorY = ey + 46 + (visibleLines - 1) * lineH;
+    if (visibleLines > 0 && visibleLines <= code.length && Math.sin(ft * 9) > 0) {
+        const last = code[visibleLines - 1] || '';
         ctx.font = '500 16px "JetBrains Mono", monospace';
-        const lw = ctx.measureText(lastLine).width;
         ctx.fillStyle = file.accent;
-        ctx.fillRect(ex + 80 + lw + 4, cursorY - 15, 2, 22);
+        ctx.fillRect(LX + 66 + ctx.measureText(last).width + 4, ey + 34 + (visibleLines - 1) * lineH - 14, 2, 20);
     }
 
-    // ── Popups appear in the lower-left corner of the editor ──
-    const popupBaseTime = code.length * lineDelay + 0.4;
-    file.popups.forEach((popup, i) => {
-        const appearAt = popupBaseTime + i * 0.9;
-        const disappearAt = appearAt + 1.8;
+    // ================= the midline =================
+    // The portrait plate cuts here, so the two halves are two plates.
+    ctx.strokeStyle = '#1a2430';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(LX, 400.5);
+    ctx.lineTo(LX + LW, 400.5);
+    ctx.stroke();
 
-        if (tabT < appearAt || tabT > disappearAt + 0.3) return;
+    // ================= BOTTOM HALF - what it produced =================
+    const codeDone = code.length * lineDelay + 0.25;
 
-        let progress;
-        if (tabT < appearAt + 0.25) {
-            progress = easeOutCubic((tabT - appearAt) / 0.25);
-        } else if (tabT < disappearAt - 0.25) {
-            progress = 1;
-        } else {
-            progress = 1 - easeOutCubic((tabT - (disappearAt - 0.25)) / 0.55);
-        }
-
-        if (progress <= 0.01) return;
-
-        const popupW = 280;
-        const popupH = 46;
-        const popupX = ex + 20 + (1 - progress) * -40;
-        const popupY = ey + editorH - 60 - i * 56;
-        const alpha = progress;
-
-        ctx.save();
-        ctx.globalAlpha = alpha;
-
-        // Shadow
-        ctx.shadowColor = 'rgba(0,0,0,0.5)';
-        ctx.shadowBlur = 12;
-        ctx.shadowOffsetY = 3;
-
-        // Popup bg
-        ctx.fillStyle = '#0a1220';
-        roundRect(ctx, popupX, popupY, popupW, popupH, 10);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.shadowOffsetY = 0;
-
-        // Accent border
-        ctx.strokeStyle = popup.color;
-        ctx.lineWidth = 1.5;
-        roundRect(ctx, popupX, popupY, popupW, popupH, 10);
-        ctx.stroke();
-
-        // Left accent bar
-        ctx.fillStyle = popup.color;
-        ctx.fillRect(popupX, popupY + 8, 3, popupH - 16);
-
-        // Icon
-        ctx.fillStyle = popup.color;
-        ctx.font = '700 18px monospace';
-        ctx.fillText(popup.icon, popupX + 20, popupY + 30);
-
-        // Text
-        ctx.fillStyle = '#d0d4dc';
-        ctx.font = '500 14px "Inter", sans-serif';
-        ctx.fillText(popup.t, popupX + 48, popupY + 29);
-
-        ctx.restore();
-    });
-
-    // Bottom status
     ctx.fillStyle = '#4a525c';
-    ctx.font = '600 13px "JetBrains Mono", monospace';
-    const fileNum = activeIdx + 1;
-    ctx.fillText('FILE ' + fileNum + ' / ' + files.length + ' · ln ' + visibleLines, ex + 22, ey + editorH + 30);
+    ctx.font = '600 12px "JetBrains Mono", monospace';
+    ctx.fillText('OUTPUT', LX, 432);
+
+    const runU = clamp01((ft - codeDone) * 2.2);
+    ctx.fillStyle = runU > 0.5 ? '#3fca7d' : '#3a4048';
+    ctx.beginPath();
+    ctx.arc(LX + LW - 10, 428, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    const oy = 448, oh = 330;
+    ctx.fillStyle = '#080c12';
+    ctx.strokeStyle = '#1a2028';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, LX, oy, LW, oh, 10);
+    ctx.fill();
+    ctx.stroke();
+
+    // the command
+    ctx.fillStyle = file.accent;
+    ctx.font = '600 15px "JetBrains Mono", monospace';
+    ctx.fillText('$', LX + 22, oy + 40);
+
+    const cmd = file.cmd;
+    const cmdChars = Math.floor(clamp01((ft - codeDone) * 3.4) * cmd.length);
+    ctx.fillStyle = '#d0d4dc';
+    ctx.font = '500 15px "JetBrains Mono", monospace';
+    ctx.fillText(cmd.slice(0, cmdChars), LX + 44, oy + 40);
+
+    // the result
+    const outStart = codeDone + cmd.length / (3.4 * cmd.length) + 0.45;
+    const outDelay = 0.30;
+    file.out.forEach((row, i) => {
+        const u = clamp01((ft - outStart - i * outDelay) * 5);
+        if (u <= 0) return;
+        ctx.globalAlpha = easeOutCubic(u);
+
+        const y = oy + 82 + i * 38;
+        const isLast = i === file.out.length - 1;
+
+        if (isLast) {
+            ctx.fillStyle = '#3fca7d';
+            ctx.font = '600 16px "JetBrains Mono", monospace';
+            ctx.fillText('\u2713', LX + 26, y);
+            ctx.fillStyle = row[1];
+            ctx.font = '500 16px "JetBrains Mono", monospace';
+            ctx.fillText(row[0], LX + 52, y);
+        } else {
+            ctx.fillStyle = '#2b3a4e';
+            ctx.fillRect(LX + 26, y - 5, 5, 5);
+            ctx.fillStyle = row[1];
+            ctx.font = '500 15px "JetBrains Mono", monospace';
+            ctx.fillText(row[0], LX + 52, y);
+        }
+        ctx.globalAlpha = 1;
+    });
 }
 
-// ── 07 · FRAMEWORKS — more alive ─────────────────────────
 function drawFrameworks(ctx, W, H, t) {
     ctx.fillStyle = '#0a0e14';
     ctx.fillRect(0, 0, W, H);
@@ -1623,198 +1960,354 @@ function drawFrameworks(ctx, W, H, t) {
 }
 
 // ── 08 · AI / DATA — bobbing, more alive ─────────────────
+/* One pass of rl-scientist: eight real parameters, the score each one
+   got, and whether it survived. The curve, the scatter and the log all
+   read off this one list, so they can never disagree with each other. */
+const AIDATA_EXPERIMENTS = [
+    { param: 'gamma',     from: '.99',  to: '.995',   score: 344.1, kept: false, sx: 0.18, sy: 0.80,
+      why: 'credit is arriving too late to matter' },
+    { param: 'batch',     from: '512',  to: '1024',   score: 371.8, kept: true,  sx: 0.34, sy: 0.58,
+      why: 'gradient noise is drowning the signal' },
+    { param: 'beta',      from: '5e-3', to: '1.2e-2', score: 381.2, kept: true,  sx: 0.46, sy: 0.34,
+      why: 'entropy std fell 0.44 to 0.05, it stopped exploring' },
+    { param: 'epsilon',   from: '.2',   to: '.3',     score: 356.0, kept: false, sx: 0.62, sy: 0.74,
+      why: 'let it take bigger policy steps' },
+    { param: 'hidden',    from: '128',  to: '256',    score: 379.4, kept: false, sx: 0.28, sy: 0.24,
+      why: 'maybe the network is simply too small' },
+    { param: 'num_epoch', from: '3',    to: '5',      score: 392.5, kept: true,  sx: 0.72, sy: 0.46,
+      why: 'reuse each batch harder before dropping it' },
+    { param: 'lambd',     from: '.95',  to: '.92',    score: 401.3, kept: true,  sx: 0.84, sy: 0.62,
+      why: 'trade a little bias for far less variance' },
+    { param: 'lr',        from: '3e-4', to: '1e-4',   score: 412.7, kept: true,  sx: 0.56, sy: 0.18,
+      why: 'reward flat at 381 for 40k steps' }
+];
+
+const AIDATA_STEPS = ['PROPOSE', 'RUN', 'SCORE', 'KEEP / REVERT'];
+/* One experiment, in seconds. Propose long enough to read the quote,
+   run long enough that it looks like work, judge quickly. */
+const AIDATA_BOUNDS = [0, 4.4, 10.2, 13.0, 17.0];
+
+/* The ring. Nodes sit on it at the quarter angles and the token runs
+   round it, so the token passes through each step exactly as that step
+   becomes the live one -- the geometry and the timing come off the same
+   number and cannot drift apart. */
+const RING_CX = 640, RING_CY = 414, RING_RX = 484, RING_RY = 302;
+
+function ringPoint(ang) {
+    return [RING_CX + Math.cos(ang) * RING_RX, RING_CY + Math.sin(ang) * RING_RY];
+}
+
+function drawStepNode(ctx, ang, label, live, accent) {
+    const [cx, cy] = ringPoint(ang);
+    const w = 22 + label.length * 9.2, h = 52;
+    const x = cx - w / 2, y = cy - h / 2;
+
+    ctx.fillStyle = live ? '#0f2419' : '#0a1410';
+    ctx.strokeStyle = live ? accent : '#1d4032';
+    ctx.lineWidth = live ? 2 : 1.2;
+    roundRect(ctx, x, y, w, h, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    if (live) {
+        ctx.save();
+        ctx.globalAlpha = 0.16;
+        ctx.fillStyle = accent;
+        roundRect(ctx, x - 5, y - 5, w + 10, h + 10, 11);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    ctx.fillStyle = live ? '#c8ffe4' : '#4a7d63';
+    ctx.font = '600 15px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, cx, cy + 6);
+    ctx.textAlign = 'left';
+    return [cx, cy, w, h];
+}
+
 function drawAIData(ctx, W, H, t) {
     ctx.fillStyle = '#0a0e14';
     ctx.fillRect(0, 0, W, H);
 
-    const LOOP = 10;
-    const cycle = t % LOOP;
-    const progress = easeOutCubic(clamp01(cycle / 8));
-    const epoch = Math.min(10, Math.floor(progress * 10) + 1);
+    const ACCENT = '#3fca7d';
+    const EXP = AIDATA_BOUNDS[4];
+    const total = AIDATA_EXPERIMENTS.length;
+    const idx = Math.floor(t / EXP) % total;
+    const et = t % EXP;
+    const exp = AIDATA_EXPERIMENTS[idx];
 
-    drawChrome(ctx, W, 'ai-data · training', '● EPOCH ' + epoch + ' / 10');
+    let step = 0;
+    for (let i = 0; i < 4; i++) {
+        if (et >= AIDATA_BOUNDS[i] && et < AIDATA_BOUNDS[i + 1]) { step = i; break; }
+    }
+    const stepU = clamp01((et - AIDATA_BOUNDS[step]) /
+                          (AIDATA_BOUNDS[step + 1] - AIDATA_BOUNDS[step]));
 
-    // ── Whole network panel bobs gently ──
-    const bob = Math.sin(t * 0.7) * 3;
+    drawChrome(ctx, W, 'ai-data \u00b7 rl-scientist', '\u25cf EXPERIMENT ' + (idx + 1) + ' / ' + total);
 
-    const nnX = 60, nnY = 120 + bob, nnW = W - 120, nnH = 380;
+    // ================= the ring =================
+    ctx.strokeStyle = '#14291f';
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([5, 9]);
+    ctx.beginPath();
+    ctx.ellipse(RING_CX, RING_CY, RING_RX, RING_RY, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
 
-    ctx.fillStyle = '#0d1119';
-    ctx.strokeStyle = '#1a2028';
-    ctx.lineWidth = 1.5;
-    roundRect(ctx, nnX, nnY, nnW, nnH, 12);
+    // The token's position comes off the PHASE, not off raw time, so it
+    // sits exactly on whichever node is lit. Taking it from et / EXP
+    // meant the phases (which are not equal lengths) did not line up with
+    // the quarter turns, and the token ran up to a quarter of the ring
+    // past the live step. That desync is what read as lighting late.
+    const u = (step + stepU) / 4;
+    const a0 = -Math.PI / 2;
+    ctx.strokeStyle = 'rgba(63,202,125,0.42)';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.ellipse(RING_CX, RING_CY, RING_RX, RING_RY, 0, a0, a0 + u * Math.PI * 2);
+    ctx.stroke();
+
+    const angles = [-Math.PI / 2, 0, Math.PI / 2, Math.PI];
+    for (let i = 0; i < 4; i++) {
+        drawStepNode(ctx, angles[i], AIDATA_STEPS[i], i === step, ACCENT);
+    }
+
+    // the token
+    const [tx, ty] = ringPoint(a0 + u * Math.PI * 2);
+    const glow = ctx.createRadialGradient(tx, ty, 0, tx, ty, 26);
+    glow.addColorStop(0, 'rgba(200,255,228,0.85)');
+    glow.addColorStop(1, 'rgba(63,202,125,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(tx, ty, 26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#e8fff4';
+    ctx.beginPath();
+    ctx.arc(tx, ty, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // what the model just said, under PROPOSE
+    if (step === 0) {
+        ctx.globalAlpha = easeOutCubic(clamp01(stepU * 2.4));
+        ctx.fillStyle = '#9096a0';
+        ctx.font = '500 15px "Inter", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('"' + exp.why + '"', RING_CX, 170);
+        ctx.fillStyle = '#c8ffe4';
+        ctx.font = '600 16px "JetBrains Mono", monospace';
+        ctx.fillText(exp.param + '   ' + exp.from + '  \u2192  ' + exp.to, RING_CX, 196);
+        ctx.textAlign = 'left';
+        ctx.globalAlpha = 1;
+    }
+
+    // ================= D4 - the curve, with the scar in it =================
+    const cX = 330, cY = 214, cW = 300, cH = 232;
+
+    ctx.fillStyle = '#080f0c';
+    ctx.strokeStyle = '#16301f';
+    ctx.lineWidth = 1.2;
+    roundRect(ctx, cX, cY, cW, cH, 8);
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = '#4a525c';
-    ctx.font = '600 13px "JetBrains Mono", monospace';
-    ctx.fillText('NETWORK · 8 → 12 → 4', nnX + 24, nnY + 34);
+    ctx.fillStyle = '#4a7d63';
+    ctx.font = '600 11px "JetBrains Mono", monospace';
+    ctx.fillText('MEAN REWARD', cX + 14, cY + 22);
 
-    const layers = [8, 12, 4];
-    const nodes = [];
-    const layerSpacing = (nnW - 180) / (layers.length - 1);
+    const lo = 320, hi = 430;
+    const px = (i) => cX + 26 + (i / (total - 1)) * (cW - 48);
+    const py = (s) => cY + cH - 26 - ((s - lo) / (hi - lo)) * (cH - 58);
 
-    for (let L = 0; L < layers.length; L++) {
-        const n = layers[L];
-        const x = nnX + 90 + L * layerSpacing;
-        const vSpacing = (nnH - 140) / (n - 1);
-        const startY = nnY + 80;
-        const layerNodes = [];
-        for (let i = 0; i < n; i++) {
-            layerNodes.push({ x, y: startY + i * vSpacing });
-        }
-        nodes.push(layerNodes);
+    ctx.strokeStyle = '#11231a';
+    ctx.lineWidth = 0.8;
+    for (let g = 0; g <= 3; g++) {
+        const gy = cY + 34 + g * ((cH - 60) / 3);
+        ctx.beginPath();
+        ctx.moveTo(cX + 20, gy);
+        ctx.lineTo(cX + cW - 16, gy);
+        ctx.stroke();
     }
 
-    // Connections
-    for (let L = 0; L < nodes.length - 1; L++) {
-        const from = nodes[L];
-        const to = nodes[L + 1];
-        for (let i = 0; i < from.length; i++) {
-            for (let j = 0; j < to.length; j++) {
-                if (hash01(i * 17 + j * 31 + L * 7) > 0.5) continue;
-                const n1 = from[i];
-                const n2 = to[j];
-                const strength = hash01(i + j * 3 + L * 5);
-                const pulse = Math.max(0, Math.sin(t * 2.5 - (i + j) * 0.18 - L * 0.6));
-                // More visible pulse
-                ctx.strokeStyle = `rgba(77,139,245,${0.04 + pulse * 0.28 * strength})`;
-                ctx.lineWidth = 0.5 + strength * 1.0;
-                ctx.beginPath();
-                ctx.moveTo(n1.x, n1.y);
-                ctx.lineTo(n2.x, n2.y);
-                ctx.stroke();
+    // points up to and including the one running now
+    const shown = idx + (step >= 1 ? 1 : 0);
+    ctx.strokeStyle = ACCENT;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < shown; i++) {
+        const e = AIDATA_EXPERIMENTS[i];
+        const x = px(i), y = py(e.score);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
 
-                // Fast travel particle on strong connections
-                if (strength > 0.75 && pulse > 0.5) {
-                    const dotU = (t * 1.5 + i * 0.3 + j * 0.2) % 1;
-                    const px = lerp(n1.x, n2.x, dotU);
-                    const py = lerp(n1.y, n2.y, dotU);
-                    ctx.fillStyle = `rgba(180, 220, 255, ${pulse * 0.9})`;
-                    ctx.beginPath();
-                    ctx.arc(px, py, 2.5, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-            }
-        }
+    for (let i = 0; i < shown; i++) {
+        const e = AIDATA_EXPERIMENTS[i];
+        ctx.fillStyle = e.kept ? '#7be8ae' : '#8a5050';
+        ctx.beginPath();
+        ctx.arc(px(i), py(e.score), e.kept ? 3.4 : 2.8, 0, Math.PI * 2);
+        ctx.fill();
     }
 
-    // Nodes — more alive with breathing
-    for (let L = 0; L < nodes.length; L++) {
-        for (let i = 0; i < nodes[L].length; i++) {
-            const n = nodes[L][i];
-            const phase = i * 0.4 + L * 1.3;
-            const glow = 0.5 + 0.5 * Math.sin(t * 3 + phase); // faster
-            const brightness = L === 0 ? 0.5 : (L === 1 ? 0.75 : 1.0);
-            const size = 6 + glow * 2;
-
-            ctx.fillStyle = `rgba(77,139,245,${(0.5 + glow * 0.5) * brightness})`;
-            ctx.beginPath();
-            ctx.arc(n.x, n.y, size, 0, Math.PI * 2);
-            ctx.fill();
-
-            if (glow > 0.6) {
-                ctx.fillStyle = `rgba(160,200,255,${(glow - 0.6) * 2.5 * brightness})`;
-                ctx.beginPath();
-                ctx.arc(n.x, n.y, size * 2, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        }
+    // mark the worst revert, because the dip is the honest part
+    let worst = 0;
+    for (let i = 1; i < Math.max(1, shown); i++) {
+        if (!AIDATA_EXPERIMENTS[i].kept &&
+            AIDATA_EXPERIMENTS[i].score < AIDATA_EXPERIMENTS[worst].score) worst = i;
+    }
+    if (shown > worst && !AIDATA_EXPERIMENTS[worst].kept) {
+        const wx = px(worst), wy = py(AIDATA_EXPERIMENTS[worst].score);
+        ctx.strokeStyle = 'rgba(255,107,107,0.5)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(wx, wy + 6);
+        ctx.lineTo(wx, cY + cH - 16);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#8a5050';
+        ctx.font = '500 10px "JetBrains Mono", monospace';
+        ctx.fillText('reverted', wx - 18, cY + cH - 6);
     }
 
-    // ── Bottom row ──
-    const botY = nnY + nnH + 30;
-    const botH = H - botY - 40 + bob * -0.5; // bottom bobs opposite
+    // the live score, resolving during SCORE
+    if (step >= 2) {
+        const su = step === 2 ? easeOutCubic(stepU) : 1;
+        ctx.fillStyle = '#c8ffe4';
+        ctx.font = '600 26px "Inter", sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText((exp.score * su).toFixed(1), cX + cW - 16, cY + 32);
+        ctx.textAlign = 'left';
+    }
 
-    // Loss chart
-    const chartW = (W - 120) * 0.55;
-    const chartX = 60;
+    // ================= D5 - the search space =================
+    const sX = 650, sY = 214, sW = 300, sH = 232;
 
-    ctx.fillStyle = '#0d1119';
-    ctx.strokeStyle = '#1a2028';
-    ctx.lineWidth = 1.5;
-    roundRect(ctx, chartX, botY, chartW, botH, 12);
+    ctx.fillStyle = '#080f0c';
+    ctx.strokeStyle = '#16301f';
+    ctx.lineWidth = 1.2;
+    roundRect(ctx, sX, sY, sW, sH, 8);
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = '#4a525c';
-    ctx.font = '600 13px "JetBrains Mono", monospace';
-    ctx.fillText('TRAINING LOSS', chartX + 22, botY + 30);
+    ctx.fillStyle = '#4a7d63';
+    ctx.font = '600 11px "JetBrains Mono", monospace';
+    ctx.fillText('SEARCH SPACE', sX + 14, sY + 22);
 
-    const cx2 = chartX + 22;
-    const cy2 = botY + 55;
-    const cw2 = chartW - 44;
-    const chh2 = botH - 80;
+    ctx.strokeStyle = '#16301f';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(sX + 34, sY + 34);
+    ctx.lineTo(sX + 34, sY + sH - 30);
+    ctx.lineTo(sX + sW - 18, sY + sH - 30);
+    ctx.stroke();
 
-    const N = 40;
-    const pts = [];
-    for (let i = 0; i <= N; i++) {
-        const u = i / N;
-        if (u > progress) break;
-        const x = cx2 + u * cw2;
-        const y = cy2 + chh2 * (0.12 + u * 0.65) + Math.sin(u * 18) * 3 * (1 - u);
-        pts.push({ x, y });
+    const dotX = (e) => sX + 44 + e.sx * (sW - 74);
+    const dotY = (e) => sY + 44 + (1 - e.sy) * (sH - 88);
+
+    let best = -1;
+    for (let i = 0; i < shown; i++) {
+        const e = AIDATA_EXPERIMENTS[i];
+        const norm = clamp01((e.score - lo) / (hi - lo));
+        const r = 3 + norm * 5;
+        ctx.fillStyle = e.kept
+            ? 'rgba(63,202,125,' + (0.35 + norm * 0.6).toFixed(2) + ')'
+            : 'rgba(120,80,80,0.55)';
+        ctx.beginPath();
+        ctx.arc(dotX(e), dotY(e), r, 0, Math.PI * 2);
+        ctx.fill();
+        if (best < 0 || e.score > AIDATA_EXPERIMENTS[best].score) best = i;
     }
 
-    if (pts.length > 1) {
+    if (best >= 0) {
+        const e = AIDATA_EXPERIMENTS[best];
+        const bx = dotX(e), by = dotY(e);
+        const pulse = 13 + Math.sin(t * 1.1) * 1.6;
+        ctx.strokeStyle = '#7be8ae';
+        ctx.lineWidth = 1.3;
         ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-        ctx.strokeStyle = '#3fca7d';
-        ctx.lineWidth = 2.5;
+        ctx.arc(bx, by, pulse, 0, Math.PI * 2);
         ctx.stroke();
-
-        // Gradient fill under
-        ctx.lineTo(pts[pts.length - 1].x, cy2 + chh2);
-        ctx.lineTo(pts[0].x, cy2 + chh2);
-        ctx.closePath();
-        const g = ctx.createLinearGradient(0, cy2, 0, cy2 + chh2);
-        g.addColorStop(0, 'rgba(63, 202, 125, 0.15)');
-        g.addColorStop(1, 'rgba(63, 202, 125, 0)');
-        ctx.fillStyle = g;
-        ctx.fill();
-
-        const head = pts[pts.length - 1];
-        const pulse = 0.5 + 0.5 * Math.sin(t * 6);
-        ctx.fillStyle = `rgba(63,202,125,${0.6 + pulse * 0.4})`;
-        ctx.beginPath();
-        ctx.arc(head.x, head.y, 5, 0, Math.PI * 2);
-        ctx.fill();
-    }
-
-    // Stats cards
-    const statsX = chartX + chartW + 30;
-    const statsW = W - statsX - 60;
-    const statCardW = (statsW - 20) / 3;
-
-    const stats = [
-        ['LOSS',     fmt(0.847 - progress * 0.759, 3), '#3fca7d'],
-        ['ACCURACY', (42 + progress * 54).toFixed(1) + '%', '#6ba0ff'],
-        ['EPOCH',    epoch + ' / 10', '#d0d4dc']
-    ];
-
-    stats.forEach((s, i) => {
-        const sx = statsX + i * (statCardW + 10);
-        const statBob = Math.sin(t * 0.9 + i * 0.8) * 2;
-
-        ctx.fillStyle = '#0d1119';
-        ctx.strokeStyle = '#1a2028';
-        ctx.lineWidth = 1.5;
-        roundRect(ctx, sx, botY + statBob, statCardW, botH - statBob, 12);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = '#4a525c';
+        ctx.fillStyle = '#c8ffe4';
         ctx.font = '600 12px "JetBrains Mono", monospace';
-        ctx.fillText(s[0], sx + 20, botY + 30 + statBob);
+        ctx.fillText(e.score.toFixed(1), bx + 19, by - 2);
+        ctx.fillStyle = '#4a7d63';
+        ctx.font = '500 10px "JetBrains Mono", monospace';
+        ctx.fillText('best so far', bx + 19, by + 12);
+    }
 
-        ctx.fillStyle = s[2];
-        ctx.font = '600 26px "JetBrains Mono", monospace';
-        ctx.fillText(s[1], sx + 20, botY + 72 + statBob);
-    });
+    ctx.fillStyle = '#3a5f4c';
+    ctx.font = '500 10px "JetBrains Mono", monospace';
+    ctx.fillText('learning rate', sX + sW - 96, sY + sH - 14);
+    ctx.save();
+    ctx.translate(sX + 22, sY + 92);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('beta', 0, 0);
+    ctx.restore();
+
+    // ================= D2 - the little log tab =================
+    const lX = 330, lY = 496, lW = 620, lH = 146;
+
+    ctx.fillStyle = '#0a1410';
+    ctx.strokeStyle = '#1d4032';
+    ctx.lineWidth = 1.2;
+    roundRect(ctx, lX + 14, lY - 20, 74, 24, 5);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#7be8ae';
+    ctx.font = '600 11px "JetBrains Mono", monospace';
+    ctx.fillText('LOG', lX + 34, lY - 4);
+
+    ctx.fillStyle = '#080f0c';
+    ctx.strokeStyle = '#16301f';
+    ctx.lineWidth = 1.2;
+    roundRect(ctx, lX, lY, lW, lH, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    // the last four, newest at the bottom
+    const first = Math.max(0, shown - 4);
+    for (let i = first; i < shown; i++) {
+        const e = AIDATA_EXPERIMENTS[i];
+        const row = i - first;
+        const y = lY + 30 + row * 29;
+        const isLive = (i === idx);
+        const fade = isLive ? 1 : 0.34 + row * 0.13;
+
+        if (isLive) {
+            ctx.fillStyle = '#0f2419';
+            ctx.strokeStyle = 'rgba(63,202,125,0.5)';
+            ctx.lineWidth = 1;
+            roundRect(ctx, lX + 10, y - 17, lW - 20, 25, 4);
+            ctx.fill();
+            ctx.stroke();
+        }
+
+        ctx.globalAlpha = fade;
+        ctx.font = '500 13px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#4a7d63';
+        ctx.fillText(String(i + 1).padStart(2, '0'), lX + 22, y);
+        ctx.fillStyle = isLive ? '#ededf0' : '#b0b8c4';
+        ctx.fillText(e.param, lX + 58, y);
+        ctx.fillText(e.from + '  \u2192  ' + e.to, lX + 190, y);
+
+        // the verdict only lands once the run is judged
+        const judged = !isLive || step === 3;
+        if (judged) {
+            ctx.fillStyle = isLive ? '#c8ffe4' : '#9096a0';
+            ctx.fillText(e.score.toFixed(1), lX + 400, y);
+            ctx.fillStyle = e.kept ? '#3fca7d' : '#ff6b6b';
+            ctx.font = '600 14px "JetBrains Mono", monospace';
+            ctx.fillText(e.kept ? '\u2713 kept' : '\u2715 reverted', lX + 482, y);
+        } else {
+            ctx.fillStyle = '#4a7d63';
+            const dots = '.'.repeat(1 + Math.floor((t * 1.3) % 3));
+            ctx.fillText('running' + dots, lX + 400, y);
+        }
+        ctx.globalAlpha = 1;
+    }
 }
 
-// ── 09 · OTHER — more detail, alive, notifications ───────
 function drawOther(ctx, W, H, t) {
     ctx.fillStyle = '#0a0e14';
     ctx.fillRect(0, 0, W, H);

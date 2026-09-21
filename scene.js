@@ -22,6 +22,7 @@ class PortfolioScene {
     constructor(canvas) {
         this.manager = new SceneManager(canvas);
         this.quality = new QualityManager(this.manager.renderer);
+        this.quality.applyPixelRatio();     // before the first frame, not after
 
         this.lighting  = new Lighting(this.manager.scene);
 
@@ -30,7 +31,11 @@ class PortfolioScene {
         this.world     = new World(this.manager.scene, this.quality, this.cameraDirector);
         this.particles = new ParticleSystem(this.manager.scene, this.quality);
 
-        this.panels = new ProjectPanels(this.manager.scene);
+        // Was constructed without quality, which pinned the canvas
+        // repaints at 24fps on every device. Repainting and re-uploading
+        // a 1280x800 canvas 24 times a second is the single most
+        // expensive thing this scene does on a phone.
+        this.panels = new ProjectPanels(this.manager.scene, this.quality);
         this.handCursor = new HandCursor();
         this.aaupsNarrative = null; // created once panels exist
         this.handPos = new THREE.Vector3();
@@ -57,6 +62,14 @@ class PortfolioScene {
             reveal:         null
         });
 
+        // Same pattern as __handCursor / __panelRig above.
+        window.__interaction = this.interaction;
+
+        /* The composer runs everywhere, phone included. Its final pass
+           is not an effect you can drop: it carries the vignette, the
+           grain and the floor clamp that the whole scene is graded
+           against. Skipping it on mobile rendered the frame ungraded
+           and every accent came out wrong. */
         try {
             this.post = new PostProcessing(this.manager, this.quality);
         } catch (err) {
