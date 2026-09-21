@@ -1,14 +1,16 @@
 /* ============================================================
-   World.js — background, atmosphere, grid, shadow, core, structure
-   Hive is disabled. Structure replaces it.
+   World.js — background, atmosphere, field, water, core, rig
+   ------------------------------------------------------------
+   Hive is disabled. WorldStructure is retired: PanelRig holds the
+   panels now, FieldSky is the sky and WetFloor is the floor.
    ============================================================ */
 
-import { Atmosphere }     from './Atmosphere.js';
-import { Background }     from './Background.js';
-import { Core }           from './Core.js';
-import { FloorGrid }      from './FloorGrid.js';
-import { ShadowPool }     from './ShadowPool.js';
-import { WorldStructure } from './WorldStructure.js';
+import { Atmosphere } from './Atmosphere.js';
+import { Background } from './Background.js';
+import { Core }       from './Core.js';
+import { WetFloor }   from './WetFloor.js';
+import { FieldSky }   from './FieldSky.js';
+import { PanelRig }   from './PanelRig.js';
 
 export class World {
     constructor(scene, quality, cameraDirector) {
@@ -16,22 +18,26 @@ export class World {
 
         this.background = new Background(scene);
         this.atmosphere = new Atmosphere(scene);
-        this.floorGrid  = new FloorGrid(scene);
-        this.shadowPool = new ShadowPool(scene);
+
+        // Sky and floor
+        this.fieldSky = new FieldSky(scene, quality);
+        this.wetFloor = new WetFloor(scene, quality);
 
         this.core = new Core(scene);
-        this.structure = new WorldStructure(scene, cameraDirector);
 
-        // Expose globally so SceneDirector can call setPose
-        window.__worldStructure = this.structure;
+        // The thing that holds the screens
+        this.rig = new PanelRig(scene, cameraDirector, quality);
+
+        // SceneDirector reaches for these by name
+        window.__panelRig = this.rig;
     }
 
     update(dt) {
         this.background.update(dt);
         this.atmosphere.update(dt);
-        this.floorGrid.update(dt);
-        this.shadowPool.update(dt);
+        this.fieldSky.update(dt);
+        this.wetFloor.update(dt);
         this.core.update(dt);
-        this.structure.update(dt);
+        this.rig.update(dt);
     }
 }

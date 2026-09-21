@@ -1,6 +1,6 @@
 /* ============================================================
    SceneDirector.js — scroll position → scene state
-   Drives panel, label, camera, and WorldStructure pose.
+   Drives panel, label, camera, and rig pose.
    ============================================================ */
 
 import { FormationRegistry, FORMATION_NAMES } from '../formations/FormationRegistry.js';
@@ -23,6 +23,12 @@ const NEUTRAL_ACCENT = 0x4d8bf5;
 
 const HOLD_BAND = 0.32;
 
+/* How long the ending takes to play once you have arrived at contact.
+   It is a timer rather than a scroll range because there is less than
+   one screen of page left after the last project — scrubbing it by the
+   wheel would flash the whole thing past in a flick. */
+const FAREWELL_SECONDS = 12.0;
+
 const POSE_SLOT    = { pos: [0, 5.0, 14.2], look: [0, 4.9, 0], focus: 11.5 };
 const POSE_NEUTRAL = { pos: [0, 4.4, 22.0], look: [0, 4.2, 0], focus: 21.0 };
 
@@ -37,6 +43,10 @@ export class SceneDirector {
         this.camera = cameraDirector;
         this.panels = panels;
         this.labels = labels;
+        this._fwT   = 0;
+
+        // The rig carries the panel, so it needs to reach it.
+        if (world.rig && world.rig.attachPanels) world.rig.attachPanels(panels);
 
         this.core = world.core;
 
@@ -114,7 +124,7 @@ export class SceneDirector {
             return {
                 from: 'neutral', to: 'neutral', t: 1,
                 panel: -1, panelOpacity: 0, accent: NEUTRAL_ACCENT, stage: 0,
-                slot: -1, pose: 'neutral'
+                slot: -1, pose: 'neutral', transit: 0, transitDir: 1
             };
         }
 
@@ -126,16 +136,20 @@ export class SceneDirector {
             return {
                 from: 'neutral', to: 'neutral', t: 1,
                 panel: -1, panelOpacity: 0, accent: NEUTRAL_ACCENT, stage: 0,
-                slot: -1, pose: 'neutral'
+                slot: -1, pose: 'neutral', transit: 0, transitDir: 1
             };
         }
 
         // After the staged region → contact
+        // Note: with the current page this branch does not run — the
+        // contact node lands just past scroll 1.0, so contact is reached
+        // through the last segment below instead. Kept correct for a
+        // longer page.
         if (p >= last) {
             return {
                 from: 'contact', to: 'contact', t: 1,
                 panel: -1, panelOpacity: 0, accent: NEUTRAL_ACCENT, stage: 0,
-                slot: -1, pose: 'contact'
+                slot: -1, pose: 'contact', transit: 0, transitDir: 1
             };
         }
 
@@ -163,7 +177,13 @@ export class SceneDirector {
             accent: near.accent,
             stage: near.panel < 0 ? 0 : (1 - smoothstep(0.06, 0.46, d)),
             slot: near.panel,
-            pose: near.formation
+            pose: near.formation,
+            // 0 parked on a slot, 1 at the midpoint between two.
+            transit: 1 - closeness,
+            // First half carries the old panel out one way, second half
+            // brings the new one in from the other. The swap happens at
+            // the midpoint, where opacity is already zero.
+            transitDir: nearIsB ? 1 : -1
         };
     }
 
@@ -209,25 +229,44 @@ export class SceneDirector {
             this._lastAccent = s.accent;
             if (this.core && this.core.setAccentColor) this.core.setAccentColor(s.accent);
             if (this.panels && this.panels.setAccentColor) this.panels.setAccentColor(s.accent);
-            if (window.__worldStructure) {
-                window.__worldStructure.setAccentColor(s.accent);
-            }
+            if (this.world.rig)      this.world.rig.setAccentColor(s.accent);
+            if (this.world.fieldSky) this.world.fieldSky.setAccentColor(s.accent);
+            if (this.world.wetFloor) this.world.wetFloor.setAccentColor(s.accent);
         }
 
-        // ── WorldStructure pose ──
+        // ── Rig pose ──
         // s.pose is 'neutral' before the staged region,
         // 'contact' after it, or the current slot's formation inside it.
         if (s.pose !== this._lastPoseName) {
             this._lastPoseName = s.pose;
-            if (window.__worldStructure) {
-                window.__worldStructure.setPose(s.pose);
-            }
+            if (this.world.rig) this.world.rig.setPose(s.pose);
+        }
+
+        if (this.world.rig && this.world.rig.setTransit) {
+            this.world.rig.setTransit(s.transit, s.transitDir);
+        }
+
+        // ── The ending ──
+        // Runs itself once you have settled on contact, and rewinds a bit
+        // over twice as fast if you scroll back up, so leaving and
+        // returning does not strand the drones halfway to the horizon.
+        const arrived = s.pose === 'contact' && s.t >= 0.85;
+        this._fwT = Math.max(0, Math.min(1, this._fwT + (arrived
+            ? dt / FAREWELL_SECONDS
+            : -dt / (FAREWELL_SECONDS * 0.45))));
+
+        if (this.world.rig && this.world.rig.setFarewell) {
+            this.world.rig.setFarewell(this._fwT);
         }
 
         // ── Camera shake on slot change ──
         if (s.to !== this._lastTo && s.t > 0.03) {
-            if (this._lastTo !== undefined && this.camera.shakeImpulse) {
-                this.camera.shakeImpulse(0.12);
+            if (this._lastTo !== undefined) {
+                if (this.camera.shakeImpulse) this.camera.shakeImpulse(0.12);
+                // Core.whump() has existed since the start and never fired:
+                // its only caller was Hive, which is dead. Every delivery
+                // now sets off the ring and the flare.
+                if (this.core && this.core.whump) this.core.whump();
             }
             this._lastTo = s.to;
         }
